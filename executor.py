@@ -42,8 +42,9 @@ def validate(state,advice,layout,width,height,cards,now=None):
     now=time.time() if now is None else now
     if not layout.get('confirmed'):
         raise ValueError('請先校準座標')
-    if (width,height)!=(layout.get('width'),layout.get('height')):
-        raise ValueError('遊戲視窗尺寸改變，請重新校準')
+    base_w,base_h=layout.get('width',0),layout.get('height',0)
+    if min(width,height,base_w,base_h)<=0:
+        raise ValueError('遊戲視窗尺寸無效')
     if now-state.get('observed_at',0)>2:
         raise ValueError('局面資料過期')
     if advice.get('status')!='suggestion' or advice.get('state_fingerprint')!=fingerprint(state):

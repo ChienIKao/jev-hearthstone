@@ -9,7 +9,7 @@ from tkinter import ttk, messagebox
 from advisor import fingerprint, read_state
 from executor import DEFAULT_LAYOUT, point_for, validate, build_plan, action_succeeded, window_matches
 from strategy import sides, entity_map, name_of, get_actions
-from geometry import hand_points
+from geometry import hand_points, resized_layout
 from background_input import BackgroundInput
 import win_input as win
 
@@ -72,7 +72,7 @@ class Panel:
         ttk.Label(frame,textvariable=self.detail,wraplength=730).pack(anchor='w')
         row=ttk.Frame(frame)
         ttk.Checkbutton(frame,text='背景輸入實驗（不移動滑鼠；先用單步測試）',variable=self.background).pack(anchor='w')
-        ttk.Combobox(frame,textvariable=self.background_method,values=('anchored_touch','postmessage','sendmessage_window'),state='readonly').pack(anchor='w')
+        ttk.Combobox(frame,textvariable=self.background_method,values=('sendmessage','maa_postmessage','anchored_touch','postmessage','sendmessage_window'),state='readonly').pack(anchor='w')
         ttk.Button(frame,text='開啟輸入測試台（比較各模式）',command=self.open_test_window).pack(anchor='w')
         row.pack(fill='x',pady=15)
         ttk.Button(row,text='校準座標',command=self.calibrate).pack(side='left',padx=(0,8))
@@ -142,9 +142,13 @@ class Panel:
 
     def close(self):
         self.stop_event.set()
+        if self.worker and self.worker.is_alive():
+            self.notice='正在停止並還原遊戲視窗…'
+            self.root.after(100,self.close)
+            return
         self.root.destroy()
 
-    def arm(self,continuous,preferred=None,test_method=None,test_condition='未註記'):
+    def arm(self,continuous,preferred=None,test_method=None,test_condition='未註記',test_minimized=False):
         if self.worker and self.worker.is_alive():
             return False
         if not self.layout.get('confirmed'):
@@ -153,12 +157,14 @@ class Panel:
         self.stop_event.clear()
         background=self.background.get() if test_method is None else test_method!='sendinput'
         method=self.background_method.get() if test_method is None else test_method
-        self.worker=threading.Thread(target=self.run,args=(continuous,background,method,preferred,test_condition),daemon=True)
+        self.worker=threading.Thread(target=self.run,args=(continuous,background,method,preferred,test_condition,test_minimized),daemon=True)
         self.worker.start()
         return True
 
-    def run(self,continuous,background=False,method='postmessage',preferred=None,test_condition='未註記'):
+    def run(self,continuous,background=False,method='postmessage',preferred=None,test_condition='未註記',test_minimized=False):
         backend=None
+        hwnd=None
+        restore_minimized=False
         record={'test_id':str(time.time_ns()),'time':time.time(),'backend':method if background else 'sendinput','condition':test_condition,'sent':False,'confirmed':False}
         if isinstance(preferred,dict):record['action']=preferred
         try:
@@ -168,11 +174,25 @@ class Panel:
             if self.stop_event.wait(3):
                 return
             hwnd=win.find_game()
-            if background and method in ('anchored_touch','sendmessage_window'):
+            restore_minimized=win.minimized(hwnd)
+            if test_minimized:
+                if not background or method not in ('anchored_touch','sendmessage_window','sendmessage','maa_postmessage'):
+                    raise ValueError('最小化測試請選 MaaFramework 後端')
+                restore_minimized=True
+                win.minimize(hwnd)
+            record['minimized_before']=win.minimized(hwnd)
+            if background and method in ('anchored_touch','sendmessage_window','sendmessage','maa_postmessage'):
                 from maa_input import MaaTouchInput
                 backend=MaaTouchInput(hwnd,method)
             else:
                 backend=BackgroundInput(hwnd) if background else win
+            if restore_minimized:
+                if not hasattr(backend,'prepare_minimized'):
+                    raise ValueError('此後端尚未支援最小化視窗')
+                record['capture_size']=backend.prepare_minimized()
+                if tuple(record['capture_size'])!=win.client_rect(hwnd)[2:]:
+                    raise ValueError('擷取尺寸與客戶區不一致，未送出輸入')
+                record['window_mode']='maa_pseudo_minimized'
             seen=None
             stable_since=time.monotonic()
             self.last_pointer=win.cursor()
@@ -222,7 +242,8 @@ class Panel:
                     # Keep this multi-stage case manual until that UI is verified.
                     raise ValueError('指定目標戰吼需手動操作；普通出牌與法術已支援')
                 self.notice='執行：'+action['description']
-                plan=build_plan(state,action,self.layout)
+                current_layout=resized_layout(self.layout,width,height)
+                plan=build_plan(state,action,current_layout)
                 if fingerprint(read_state(ROOT/'state.json'))!=stamp:
                     continue
                 record.update(action=action,before_fingerprint=stamp,plan=plan,client_rect=[x,y,width,height],cursor_before=list(win.cursor()),foreground_before=win.foreground(hwnd),hand_position_source=hand_points(len(own['hand']),self.layout)[1])
@@ -233,7 +254,7 @@ class Panel:
                         raise ValueError('遊戲失去焦點，已停止')
                     current_rect=win.client_rect(hwnd)
                     expected_rect=(x,y,width,height)
-                    if not window_matches(current_rect,expected_rect,background and method=='sendmessage_window'):
+                    if not window_matches(current_rect,expected_rect,background):
                         raise ValueError('遊戲視窗移動或尺寸改變，已停止')
                 def pixel(point):
                     if not point or not all(0.01<=v<=0.99 for v in point):
@@ -249,7 +270,9 @@ class Panel:
                     elif command['op']=='drag':
                         backend.drag(pixel(command['from']),pixel(command['to']),check)
                 self.last_pointer=win.cursor()
-                record.update(sent=True,cursor_after=list(self.last_pointer),foreground_after=win.foreground(hwnd))
+                record.update(sent=True,cursor_after=list(self.last_pointer),foreground_after=win.foreground(hwnd),client_rect_after=list(win.client_rect(hwnd)))
+                if background and method=='sendmessage_window' and not restore_minimized:
+                    backend.close()
                 self.notice='輸入已送出；等待遊戲日誌確認。'
                 deadline=time.monotonic()+4
                 confirmed=False
@@ -280,8 +303,16 @@ class Panel:
                 try:
                     backend.close()
                 except Exception as exc:
-                    self.notice=f'觸控清理失敗：{exc}'
+                    self.notice=f'輸入清理失敗：{exc}'
                     record['cleanup_error']=str(exc)
+            if hwnd is not None:
+                try:
+                    if restore_minimized:
+                        win.minimize(hwnd)
+                    record['minimized_after']=win.minimized(hwnd)
+                    record['client_rect_final']=list(win.client_rect(hwnd))
+                except Exception as exc:
+                    record['window_cleanup_error']=str(exc)
             if not record['sent'] and 'error' not in record:
                 record['error']='測試已取消，未完成送出'
             record['finished_at']=time.time()
@@ -296,6 +327,7 @@ class Panel:
             own,enemy=sides(state)
             hwnd=win.find_game()
             x,y,w,h=win.client_rect(hwnd)
+            current_layout=resized_layout(self.layout,w,h) if self.layout.get('confirmed') else copy.deepcopy(self.layout)
         except Exception as exc:
             messagebox.showerror('無法校準',str(exc))
             return
@@ -319,12 +351,12 @@ class Panel:
             markers[key]=(circle,text)
             points[key]=list(point)
         for key,label in [('hero_me','我方英雄'),('hero_enemy','敵方英雄'),('power_me','英雄能力'),('end_turn','結束回合'),('play_area','出牌落點')]:
-            marker(key,label,self.layout[key],'#d39136')
+            marker(key,label,current_layout[key],'#d39136')
         for side,player in [('me',own),('enemy',enemy)]:
             for i,e in enumerate(player['board']):
-                marker(f'board:{side}:{i}',f'{side}場上 {i+1}',point_for(e['id'],state,self.layout),'#4998db')
+                marker(f'board:{side}:{i}',f'{side}場上 {i+1}',point_for(e['id'],state,current_layout),'#4998db')
         for i,e in enumerate(own['hand']):
-            marker(f'hand:{i}',f'手牌 {i+1}',point_for(e['id'],state,self.layout),'#4ec895')
+            marker(f'hand:{i}',f'手牌 {i+1}',point_for(e['id'],state,current_layout),'#4ec895')
         source=hand_points(len(own['hand']),self.layout)[1]
         label='已校準' if source=='calibrated' else '弧形推估，需核對'
         canvas.create_text(w/2,35,text=f'{len(own["hand"])} 張手牌：{label}。拖動圓點至露出的可點擊處。Enter 儲存，Esc 取消。',fill='white',font=('Microsoft JhengHei',16,'bold'))
@@ -356,6 +388,7 @@ class Panel:
                 self.root.deiconify()
                 self.notice='校準期間卡牌位置已改變，請重新開啟校準。'
                 return
+            self.layout=current_layout
             for key in ('hero_me','hero_enemy','power_me','end_turn','play_area'):
                 self.layout[key]=points[key]
             if own['hand']:

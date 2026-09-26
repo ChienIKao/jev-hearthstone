@@ -1,4 +1,27 @@
 """Count-dependent positions; measured overrides take precedence over estimates."""
+import copy
+
+
+def resized_layout(layout,width,height):
+    result=copy.deepcopy(layout)
+    base_w,base_h=layout.get('width',0),layout.get('height',0)
+    if min(width,height,base_w,base_h)<=0:
+        raise ValueError('校準與目前視窗尺寸必須大於零')
+    factor=(height/base_h)*(base_w/width)
+    def point(p):
+        return [0.5+(p[0]-0.5)*factor,p[1]]
+    for key in ('hero_me','hero_enemy','power_me','end_turn','play_area'):
+        result[key]=point(layout[key])
+    for key in ('board_center','hand_center'):
+        result[key]=0.5+(layout[key]-0.5)*factor
+    for key in ('board_step','hand_step','hand_max_span'):
+        result[key]=layout[key]*factor
+    result['hand_span_limit']=layout.get('hand_span_limit',0.36)*factor
+    for key in ('hand_overrides','board_overrides'):
+        result[key]={name:[point(p) for p in points] for name,points in layout.get(key,{}).items()}
+    result.update(width=width,height=height)
+    return result
+
 def _checked(points, count):
     if len(points)!=count or any(len(p)!=2 or not all(0.01<=v<=0.99 for v in p) for p in points):
         raise ValueError('校準點數或範圍不正確')
@@ -29,7 +52,7 @@ def hand_points(count, layout):
     if anchors:
         a=min(anchors,key=lambda row:abs(row[0]-count))
         center,span,low,curve=a[1:]
-        span=min(0.36,span*(count-1)/(a[0]-1))
+        span=min(layout.get('hand_span_limit',0.36),span*(count-1)/(a[0]-1))
         for a,b in zip(anchors,anchors[1:]):
             if a[0]<count<b[0]:
                 t=(count-a[0])/(b[0]-a[0])

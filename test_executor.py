@@ -29,8 +29,10 @@ class ExecutionTests(unittest.TestCase):
     def test_gate_rejects_stale_uncalibrated_or_resized(self):
         state,cards,advice,layout=self.setup_action()
         self.assertEqual(validate(state,advice,layout,1920,1080,cards)['kind'],'attack')
+        self.assertEqual(validate(state,advice,layout,1280,720,cards)['kind'],'attack')
+        self.assertEqual(validate(state,advice,layout,1024,768,cards)['kind'],'attack')
         with self.assertRaises(ValueError):
-            validate(state,advice,layout,1280,720,cards)
+            validate(state,advice,layout,0,0,cards)
         layout['confirmed']=False
         with self.assertRaises(ValueError):
             validate(state,advice,layout,1920,1080,cards)

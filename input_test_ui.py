@@ -7,6 +7,8 @@ from strategy import get_actions
 from advisor import read_state
 
 METHODS={
+    'Maa SendMessage（不移動視窗）':('sendmessage','MaaFramework 普通 SendMessage；不啟用游標或視窗位置對齊。'),
+    'Maa PostMessage（不移動視窗）':('maa_postmessage','MaaFramework 普通 PostMessage，含官方啟用訊息流程；不啟用位置對齊。'),
     'PostMessage（背景訊息）':('postmessage','不移動游標。先前未確認成功，仍可重新測試。'),
     'AnchoredTouch（背景觸控）':('anchored_touch','不移動游標；可能閃爍。先前未確認成功，仍可重新測試。'),
     '視窗對齊 SendMessage':('sendmessage_window','不移動游標，會短暫移動遊戲視窗；曾確認點擊和拖牌成功。'),
@@ -18,13 +20,13 @@ class InputTestWindow:
         self.panel=panel
         self.root=tk.Toplevel(panel.root)
         self.root.title('輸入測試台 — 手動單步比較')
-        self.root.geometry('940x760')
-        self.root.minsize(860,680)
+        self.root.geometry('940x830')
+        self.root.minsize(860,800)
         frame=ttk.Frame(self.root,padding=16)
         frame.pack(fill='both',expand=True)
         ttk.Label(frame,text='輸入測試台',font=('Microsoft JhengHei',19,'bold')).pack(anchor='w')
         ttk.Label(frame,text='每次只測一個動作。先保持滑鼠靜止；之後再測手動移動是否影響結果。',wraplength=880).pack(anchor='w',pady=6)
-        self.method=tk.StringVar(value='PostMessage（背景訊息）')
+        self.method=tk.StringVar(value='視窗對齊 SendMessage')
         chooser=ttk.Combobox(frame,textvariable=self.method,values=list(METHODS),state='readonly',width=45)
         chooser.pack(anchor='w')
         self.description=tk.StringVar()
@@ -33,6 +35,8 @@ class InputTestWindow:
         self.describe()
         self.condition=tk.StringVar(value='滑鼠靜止／遊戲在背景')
         ttk.Combobox(frame,textvariable=self.condition,values=('滑鼠靜止／遊戲在背景','滑鼠移動／遊戲在背景','滑鼠靜止／遊戲在前景','自行描述於備註'),state='readonly',width=45).pack(anchor='w')
+        self.minimized=tk.BooleanVar(value=False)
+        ttk.Checkbutton(frame,text='最小化測試（實驗）：透明還原後操作，完成時再次最小化',variable=self.minimized).pack(anchor='w',pady=4)
         ttk.Label(frame,text='選一個目前合法動作；出牌／英雄能力會實際消耗資源。局面變更時不會改選另一張牌。',wraplength=880).pack(anchor='w',pady=(12,5))
         self.action=tk.StringVar()
         self.actions={}
@@ -93,14 +97,14 @@ class InputTestWindow:
             self.status.set('已有測試執行中，請先停止或等它完成。')
             return
         method=METHODS[self.method.get()][0]
-        started=self.panel.arm(False,dict(action),test_method=method,test_condition=self.condition.get())
+        started=self.panel.arm(False,dict(action),test_method=method,test_condition=self.condition.get(),test_minimized=self.minimized.get())
         self.status.set('倒數 3 秒；背景模式不必切回遊戲。F8 可停止。' if started else '測試尚未開始；請檢查校準或現有工作狀態。')
 
     def show_record(self):
         selected=self.results.selection()
         if not selected:return
         r=self.records[selected[0]]
-        self.record_detail.set(f"條件：{r.get('condition','')} ｜ 前景：{r.get('foreground_before','?')} → {r.get('foreground_after','?')}\n游標：{r.get('cursor_before','?')} → {r.get('cursor_after','?')} ｜ 手牌定位：{r.get('hand_position_source','?')}\n操作：{r.get('plan',[])}")
+        self.record_detail.set(f"條件：{r.get('condition','')} ｜ 前景：{r.get('foreground_before','?')} → {r.get('foreground_after','?')}\n游標：{r.get('cursor_before','?')} → {r.get('cursor_after','?')} ｜ 手牌定位：{r.get('hand_position_source','?')}\n尺寸：{r.get('client_rect',[])[2:]} ｜ 最小化：{r.get('minimized_before','?')} → {r.get('minimized_after','?')}\n操作：{r.get('plan',[])}")
 
     def tick(self):
         if not self.root.winfo_exists():return

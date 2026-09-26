@@ -7,6 +7,13 @@ class Job:
     def wait(self):return self
 
 class TouchTests(unittest.TestCase):
+    def test_minimized_capture_must_succeed_before_input(self):
+        class Controller:
+            def post_screencap(self):return Job(False)
+        backend=MaaTouchInput.__new__(MaaTouchInput)
+        backend.controller=Controller()
+        with self.assertRaises(ValueError):backend.prepare_minimized()
+
     def test_interrupted_drag_releases_contact(self):
         events=[]
         class Controller:

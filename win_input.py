@@ -28,6 +28,8 @@ U.ClientToScreen.argtypes=[W.HWND,C.POINTER(W.POINT)]
 U.GetWindowTextLengthW.argtypes=[W.HWND]
 U.GetWindowTextW.argtypes=[W.HWND,W.LPWSTR,C.c_int]
 U.IsWindowVisible.argtypes=[W.HWND]
+U.IsIconic.argtypes=[W.HWND]
+U.ShowWindow.argtypes=[W.HWND,C.c_int]
 U.GetWindowThreadProcessId.argtypes=[W.HWND,C.POINTER(W.DWORD)]
 U.SendInput.argtypes=[W.UINT,C.POINTER(INPUT),C.c_int]
 U.SendInput.restype=W.UINT
@@ -53,7 +55,7 @@ def find_game():
             try:
                 if K.QueryFullProcessImageNameW(handle,0,name,C.byref(size)) and name.value.lower().endswith('\\hearthstone.exe'):
                     rect=W.RECT()
-                    if U.GetClientRect(hwnd,C.byref(rect)) and rect.right>600 and rect.bottom>400:
+                    if U.GetClientRect(hwnd,C.byref(rect)) and (U.IsIconic(hwnd) or (rect.right>600 and rect.bottom>400)):
                         found.append(hwnd)
             finally:
                 K.CloseHandle(handle)
@@ -74,6 +76,14 @@ def client_rect(hwnd):
 
 def foreground(hwnd):
     return U.GetForegroundWindow()==hwnd
+
+
+def minimized(hwnd):
+    return bool(U.IsIconic(hwnd))
+
+
+def minimize(hwnd):
+    U.ShowWindow(hwnd,6)
 
 
 def show_game(hwnd):
