@@ -34,6 +34,12 @@ class Panel:
         self.stop_event=threading.Event()
         self.stop_event.set()
         self.worker=None
+        self.root_path=ROOT
+        self.test_results=[]
+        if (ROOT/'input-tests.jsonl').exists():
+            for line in (ROOT/'input-tests.jsonl').read_text(encoding='utf-8').splitlines()[-100:]:
+                try:self.test_results.append(json.loads(line))
+                except ValueError:pass
         self.notice='觀察中；不會操作滑鼠。請先校準，再測試單步。'
         self.state=None
         self.advice={}
@@ -67,13 +73,13 @@ class Panel:
         row=ttk.Frame(frame)
         ttk.Checkbutton(frame,text='背景輸入實驗（不移動滑鼠；先用單步測試）',variable=self.background).pack(anchor='w')
         ttk.Combobox(frame,textvariable=self.background_method,values=('anchored_touch','postmessage','sendmessage_window'),state='readonly').pack(anchor='w')
-        ttk.Button(frame,text='背景診斷：開啟英雄表情選單',command=self.probe_background).pack(anchor='w')
+        ttk.Button(frame,text='開啟輸入測試台（比較各模式）',command=self.open_test_window).pack(anchor='w')
         row.pack(fill='x',pady=15)
         ttk.Button(row,text='校準座標',command=self.calibrate).pack(side='left',padx=(0,8))
         ttk.Button(row,text='只做一步',command=lambda:self.arm(False)).pack(side='left',padx=8)
         ttk.Button(row,text='開始連續接手',command=lambda:self.arm(True)).pack(side='left',padx=8)
         ttk.Button(row,text='停止（F8 / Esc）',command=self.stop).pack(side='right')
-        ttk.Label(frame,text='啟動後有 3 秒切回爐石；切換視窗或移動滑鼠會停止連續操作。',wraplength=730).pack(anchor='w')
+        ttk.Label(frame,text='背景模式不需切回遊戲。前景模式才需切回爐石，且手動移動滑鼠會停止。',wraplength=730).pack(anchor='w')
         ttk.Label(frame,text='手牌支援 1～10 張弧形定位；推估位置可單步測試，連續接手需校準。',wraplength=730).pack(anchor='w',pady=(2,10))
         self.table=ttk.Treeview(frame,columns=('zone','name','value'),show='headings',height=12)
         for key,label,width in [('zone','位置',80),('name','卡牌',380),('value','狀態',220)]:
@@ -127,36 +133,34 @@ class Panel:
         self.stop_event.set()
         self.notice='已停止；目前只觀察局面。'
 
-    def probe_background(self):
-        self.stop()
-        if self.worker and self.worker.is_alive():
-            self.notice='請等目前動作停止後再診斷。'
+    def open_test_window(self):
+        if getattr(self,'test_window',None) and self.test_window.root.winfo_exists():
+            self.test_window.root.lift()
             return
-        try:
-            hwnd=win.find_game()
-            _,_,w,h=win.client_rect(hwnd)
-            point=tuple(round(v*s) for v,s in zip(self.layout['hero_me'],(w,h)))
-            BackgroundInput(hwnd).right_click(point,lambda:None)
-            self.notice='已送背景右鍵；請核對英雄表情選單是否出現，尚未認定成功。'
-        except Exception as exc:
-            self.notice=str(exc)
+        from input_test_ui import InputTestWindow
+        self.test_window=InputTestWindow(self)
 
     def close(self):
         self.stop_event.set()
         self.root.destroy()
 
-    def arm(self,continuous,preferred=None):
+    def arm(self,continuous,preferred=None,test_method=None,test_condition='未註記'):
         if self.worker and self.worker.is_alive():
-            return
+            return False
         if not self.layout.get('confirmed'):
             messagebox.showinfo('先校準','先按「校準座標」，檢查標記落在卡牌與按鈕中心。')
-            return
+            return False
         self.stop_event.clear()
-        self.worker=threading.Thread(target=self.run,args=(continuous,self.background.get(),self.background_method.get(),preferred),daemon=True)
+        background=self.background.get() if test_method is None else test_method!='sendinput'
+        method=self.background_method.get() if test_method is None else test_method
+        self.worker=threading.Thread(target=self.run,args=(continuous,background,method,preferred,test_condition),daemon=True)
         self.worker.start()
+        return True
 
-    def run(self,continuous,background=False,method='postmessage',preferred=None):
+    def run(self,continuous,background=False,method='postmessage',preferred=None,test_condition='未註記'):
         backend=None
+        record={'test_id':str(time.time_ns()),'time':time.time(),'backend':method if background else 'sendinput','condition':test_condition,'sent':False,'confirmed':False}
+        if isinstance(preferred,dict):record['action']=preferred
         try:
             if background and continuous:
                 raise ValueError('背景輸入目前只開放單步驗證，請按「只做一步」')
@@ -184,11 +188,18 @@ class Panel:
                     raise ValueError('對局已結束，已停止')
                 stamp=fingerprint(state)
                 if preferred:
+                    if isinstance(preferred,dict) and preferred.get('_game_serial')!=state.get('game_serial'):
+                        raise ValueError('對局已變更，請重新選擇測試動作')
                     try:
                         legal,_=get_actions(state,self.cards)
                     except ValueError:
                         legal={}
-                    matches=[a for a in legal.values() if a['kind']==preferred and not a.get('target_id')]
+                    if isinstance(preferred,dict):
+                        matches=[a for a in legal.values() if all(a.get(k)==preferred.get(k) for k in ('kind','entity_id','target_id','key'))]
+                        if not matches:
+                            raise ValueError('所選動作已失效；請重新讀取合法動作，不會改選其他卡牌')
+                    else:
+                        matches=[a for a in legal.values() if a['kind']==preferred and not a.get('target_id')]
                     advice={'status':'suggestion','state_fingerprint':stamp,'action':matches[0]} if len(matches)==1 else {'status':'waiting'}
                 if stamp!=seen:
                     seen,stable_since=stamp,time.monotonic()
@@ -214,6 +225,7 @@ class Panel:
                 plan=build_plan(state,action,self.layout)
                 if fingerprint(read_state(ROOT/'state.json'))!=stamp:
                     continue
+                record.update(action=action,before_fingerprint=stamp,plan=plan,client_rect=[x,y,width,height],cursor_before=list(win.cursor()),foreground_before=win.foreground(hwnd),hand_position_source=hand_points(len(own['hand']),self.layout)[1])
                 def check():
                     if self.stop_event.is_set() or win.stop_pressed():
                         raise ValueError('已停止')
@@ -237,6 +249,8 @@ class Panel:
                     elif command['op']=='drag':
                         backend.drag(pixel(command['from']),pixel(command['to']),check)
                 self.last_pointer=win.cursor()
+                record.update(sent=True,cursor_after=list(self.last_pointer),foreground_after=win.foreground(hwnd))
+                self.notice='輸入已送出；等待遊戲日誌確認。'
                 deadline=time.monotonic()+4
                 confirmed=False
                 while time.monotonic()<deadline:
@@ -246,7 +260,7 @@ class Panel:
                         confirmed=True
                         break
                     self.stop_event.wait(0.1)
-                record={'time':time.time(),'backend':method if background else 'sendinput','action':action,'confirmed':confirmed,'before_fingerprint':stamp,'plan':plan,'client_rect':[x,y,width,height]}
+                record.update(confirmed=confirmed)
                 with (ROOT/'execution.jsonl').open('a',encoding='utf-8') as stream:
                     stream.write(json.dumps(record,ensure_ascii=False)+'\n')
                 if not confirmed:
@@ -259,6 +273,7 @@ class Panel:
                 self.stop_event.wait(0.6)
         except Exception as exc:
             self.notice=str(exc)
+            record['error']=str(exc)
         finally:
             self.stop_event.set()
             if backend is not None and hasattr(backend,'close'):
@@ -266,6 +281,13 @@ class Panel:
                     backend.close()
                 except Exception as exc:
                     self.notice=f'觸控清理失敗：{exc}'
+                    record['cleanup_error']=str(exc)
+            if not record['sent'] and 'error' not in record:
+                record['error']='測試已取消，未完成送出'
+            record['finished_at']=time.time()
+            with (ROOT/'input-tests.jsonl').open('a',encoding='utf-8') as stream:
+                stream.write(json.dumps(record,ensure_ascii=False)+'\n')
+            self.test_results.append(record)
 
     def calibrate(self):
         self.stop()
@@ -365,4 +387,8 @@ class Panel:
 
 
 if __name__=='__main__':
-    Panel().root.mainloop()
+    import sys
+    panel=Panel()
+    if '--test-ui' in sys.argv:
+        panel.root.after(300,panel.open_test_window)
+    panel.root.mainloop()
