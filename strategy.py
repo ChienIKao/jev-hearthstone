@@ -19,6 +19,16 @@ def hp(entity):
     return number(entity, 'HEALTH') - number(entity, 'DAMAGE')
 
 
+def card_cost(entity,cards):
+    value=entity.get('tags',{}).get('COST')
+    if value is not None:
+        try:return max(0,int(value))
+        except (ValueError,TypeError):return None
+    if cards.get(entity.get('card_id'),{}).get('cost')==0:
+        return 0
+    return None
+
+
 def text_of(entity, cards):
     text = cards.get(entity.get('card_id'), {}).get('text', '')
     return html.unescape(re.sub(r'<[^>]+>|\[x\]', '', text)).replace('\n', ' ')
@@ -76,10 +86,10 @@ def get_actions(state, cards):
         card_type = source['tags'].get('CARDTYPE')
         cost = 0
         if source['tags'].get('ZONE') == 'HAND':
-            if counts[source['id']] > 1 or 'COST' not in source['tags']:
+            cost=card_cost(source,cards)
+            if counts[source['id']] > 1 or cost is None:
                 unsupported.append(option['index'])
                 continue
-            cost = number(source, 'COST')
             if own.get('mana') is None or cost > own['mana']:
                 unsupported.append(option['index'])
                 continue

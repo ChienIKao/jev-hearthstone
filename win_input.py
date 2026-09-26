@@ -21,6 +21,9 @@ class INPUT(C.Structure):
     _anonymous_=('u',)
     _fields_=[('type',W.DWORD),('u',INPUTUNION)]
 
+class WINDOWPLACEMENT(C.Structure):
+    _fields_=[('length',W.UINT),('flags',W.UINT),('showCmd',W.UINT),('ptMinPosition',W.POINT),('ptMaxPosition',W.POINT),('rcNormalPosition',W.RECT)]
+
 U.GetForegroundWindow.restype=W.HWND
 U.SetForegroundWindow.argtypes=[W.HWND]
 U.GetClientRect.argtypes=[W.HWND,C.POINTER(W.RECT)]
@@ -30,6 +33,17 @@ U.GetWindowTextW.argtypes=[W.HWND,W.LPWSTR,C.c_int]
 U.IsWindowVisible.argtypes=[W.HWND]
 U.IsIconic.argtypes=[W.HWND]
 U.ShowWindow.argtypes=[W.HWND,C.c_int]
+U.GetWindowLongPtrW.argtypes=[W.HWND,C.c_int]
+U.GetWindowLongPtrW.restype=C.c_ssize_t
+U.SetWindowLongPtrW.argtypes=[W.HWND,C.c_int,C.c_ssize_t]
+U.SetWindowLongPtrW.restype=C.c_ssize_t
+U.SetLayeredWindowAttributes.argtypes=[W.HWND,W.DWORD,W.BYTE,W.DWORD]
+U.GetLayeredWindowAttributes.argtypes=[W.HWND,C.POINTER(W.DWORD),C.POINTER(W.BYTE),C.POINTER(W.DWORD)]
+U.GetDpiForWindow.argtypes=[W.HWND]
+U.GetWindowPlacement.argtypes=[W.HWND,C.POINTER(WINDOWPLACEMENT)]
+U.SetWindowPlacement.argtypes=[W.HWND,C.POINTER(WINDOWPLACEMENT)]
+U.GetWindowRect.argtypes=[W.HWND,C.POINTER(W.RECT)]
+U.SetWindowPos.argtypes=[W.HWND,W.HWND,C.c_int,C.c_int,C.c_int,C.c_int,W.UINT]
 U.GetWindowThreadProcessId.argtypes=[W.HWND,C.POINTER(W.DWORD)]
 U.SendInput.argtypes=[W.UINT,C.POINTER(INPUT),C.c_int]
 U.SendInput.restype=W.UINT
@@ -84,6 +98,43 @@ def minimized(hwnd):
 
 def minimize(hwnd):
     U.ShowWindow(hwnd,6)
+
+
+class HiddenWindow:
+    """Keep the game's alignment and restoration invisible until cleanup ends."""
+    def __init__(self,hwnd):
+        self.hwnd=hwnd
+        self.placement=WINDOWPLACEMENT(length=C.sizeof(WINDOWPLACEMENT))
+        if not U.GetWindowPlacement(hwnd,C.byref(self.placement)):
+            raise ValueError('無法保存視窗位置，未開始輸入')
+        self.rect=W.RECT()
+        self.was_minimized=minimized(hwnd)
+        if not U.GetWindowRect(hwnd,C.byref(self.rect)):
+            raise ValueError('無法保存視窗邊界，未開始輸入')
+        self.style=U.GetWindowLongPtrW(hwnd,-20)
+        self.color,self.alpha,self.flags=W.DWORD(),W.BYTE(255),W.DWORD(2)
+        if self.style&0x80000 and not U.GetLayeredWindowAttributes(hwnd,C.byref(self.color),C.byref(self.alpha),C.byref(self.flags)):
+            raise ValueError('無法保存視窗透明度，未開始輸入')
+        U.SetWindowLongPtrW(hwnd,-20,self.style|0x80000|0x20)
+        if not U.SetLayeredWindowAttributes(hwnd,0,0,2):
+            U.SetWindowLongPtrW(hwnd,-20,self.style)
+            raise ValueError('無法隱藏遊戲視窗，未開始輸入')
+
+    def close(self,keep_minimized=False):
+        if not self.was_minimized:
+            r=self.rect
+            for _ in range(2):
+                U.SetWindowPos(self.hwnd,None,r.left,r.top,r.right-r.left,r.bottom-r.top,0x14)
+                time.sleep(.1)
+        self.placement.showCmd=6 if keep_minimized else (self.placement.showCmd if self.placement.showCmd==3 else 4)
+        restored=U.SetWindowPlacement(self.hwnd,C.byref(self.placement))
+        time.sleep(.1)
+        if self.style&0x80000:
+            U.SetLayeredWindowAttributes(self.hwnd,self.color,self.alpha,self.flags)
+        else:
+            U.SetLayeredWindowAttributes(self.hwnd,0,255,2)
+        U.SetWindowLongPtrW(self.hwnd,-20,self.style)
+        if not restored:raise ValueError('遊戲視窗位置還原失敗')
 
 
 def show_game(hwnd):

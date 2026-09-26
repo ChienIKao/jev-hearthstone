@@ -2,6 +2,23 @@
 import time
 
 
+def align_plan(backend,make_plan,get_rect,stop_event):
+    rect=get_rect()
+    for _ in range(4):
+        if stop_event.is_set():raise ValueError('已停止')
+        width,height=rect[2:]
+        plan=make_plan(width,height)
+        first=plan[0].get('from',plan[0].get('point'))
+        if not all(0.01<=v<=0.99 for v in first):raise ValueError('座標超出遊戲範圍')
+        backend.hover((round(first[0]*width),round(first[1]*height)))
+        if stop_event.wait(.2):raise ValueError('已停止')
+        updated=get_rect()
+        if updated[2:]==rect[2:]:
+            return updated,make_plan(*updated[2:])
+        rect=updated
+    raise ValueError('跨螢幕縮放未穩定，未按下滑鼠')
+
+
 class MaaTouchInput:
     def __init__(self,hwnd,method='anchored_touch'):
         from maa.controller import Win32Controller
@@ -28,6 +45,9 @@ class MaaTouchInput:
         if frame is None or frame.size==0:
             raise ValueError('最小化視窗擷取失敗，未送出輸入')
         return frame.shape[1],frame.shape[0]
+
+    def hover(self,point):
+        self._wait(self.controller.post_touch_move(*point))
 
     def drag(self,start,end,check):
         check()

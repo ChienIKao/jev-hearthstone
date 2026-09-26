@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from advisor import fingerprint, read_state
 from executor import DEFAULT_LAYOUT, point_for, validate, build_plan, action_succeeded, window_matches
-from strategy import sides, entity_map, name_of, get_actions
+from strategy import sides, entity_map, name_of, get_actions, card_cost
 from geometry import hand_points, resized_layout
 from background_input import BackgroundInput
 import win_input as win
@@ -118,7 +118,8 @@ class Panel:
                 for zone,label in [('hand','手牌'),('board','我方場上')]:
                     for e in own[zone]:
                         t=e['tags']
-                        detail=f"{t.get('COST','?')}費" if zone=='hand' else f"{t.get('ATK','0')}/{int(t.get('HEALTH',0))-int(t.get('DAMAGE',0))}"
+                        cost=card_cost(e,self.cards)
+                        detail=f"{cost if cost is not None else '?'}費" if zone=='hand' else f"{t.get('ATK','0')}/{int(t.get('HEALTH',0))-int(t.get('DAMAGE',0))}"
                         self.table.insert('',tk.END,values=(label,name_of(e,self.cards),detail))
                 for e in enemy['board']:
                     t=e['tags']
@@ -139,6 +140,15 @@ class Panel:
             return
         from input_test_ui import InputTestWindow
         self.test_window=InputTestWindow(self)
+
+    def restore_game_window(self):
+        if self.worker and self.worker.is_alive():
+            self.notice='請先停止測試再還原視窗。'
+            return
+        try:
+            win.U.ShowWindow(win.find_game(),3)
+            self.notice='遊戲視窗已最大化復位。'
+        except Exception as exc:self.notice=str(exc)
 
     def close(self):
         self.stop_event.set()
@@ -163,6 +173,7 @@ class Panel:
 
     def run(self,continuous,background=False,method='postmessage',preferred=None,test_condition='未註記',test_minimized=False):
         backend=None
+        hidden_window=None
         hwnd=None
         restore_minimized=False
         record={'test_id':str(time.time_ns()),'time':time.time(),'backend':method if background else 'sendinput','condition':test_condition,'sent':False,'confirmed':False}
@@ -175,6 +186,9 @@ class Panel:
                 return
             hwnd=win.find_game()
             restore_minimized=win.minimized(hwnd)
+            if background and method=='sendmessage_window':
+                hidden_window=win.HiddenWindow(hwnd)
+                record['hidden_alignment']=True
             if test_minimized:
                 if not background or method not in ('anchored_touch','sendmessage_window','sendmessage','maa_postmessage'):
                     raise ValueError('最小化測試請選 MaaFramework 後端')
@@ -244,6 +258,13 @@ class Panel:
                 self.notice='執行：'+action['description']
                 current_layout=resized_layout(self.layout,width,height)
                 plan=build_plan(state,action,current_layout)
+                if background and method=='sendmessage_window':
+                    from maa_input import align_plan
+                    record['alignment_start_rect']=list(win.client_rect(hwnd))
+                    record['alignment_start_dpi']=win.U.GetDpiForWindow(hwnd)
+                    rect,plan=align_plan(backend,lambda w,h:build_plan(state,action,resized_layout(self.layout,w,h)),lambda:win.client_rect(hwnd),self.stop_event)
+                    x,y,width,height=rect
+                    record['alignment_final_dpi']=win.U.GetDpiForWindow(hwnd)
                 if fingerprint(read_state(ROOT/'state.json'))!=stamp:
                     continue
                 record.update(action=action,before_fingerprint=stamp,plan=plan,client_rect=[x,y,width,height],cursor_before=list(win.cursor()),foreground_before=win.foreground(hwnd),hand_position_source=hand_points(len(own['hand']),self.layout)[1])
@@ -255,7 +276,8 @@ class Panel:
                     current_rect=win.client_rect(hwnd)
                     expected_rect=(x,y,width,height)
                     if not window_matches(current_rect,expected_rect,background):
-                        raise ValueError('遊戲視窗移動或尺寸改變，已停止')
+                        record['unexpected_client_rect']=list(current_rect)
+                        raise ValueError('操作途中遊戲尺寸改變，已停止；請保持游標在同一螢幕')
                 def pixel(point):
                     if not point or not all(0.01<=v<=0.99 for v in point):
                         raise ValueError('座標超出遊戲範圍')
@@ -271,8 +293,6 @@ class Panel:
                         backend.drag(pixel(command['from']),pixel(command['to']),check)
                 self.last_pointer=win.cursor()
                 record.update(sent=True,cursor_after=list(self.last_pointer),foreground_after=win.foreground(hwnd),client_rect_after=list(win.client_rect(hwnd)))
-                if background and method=='sendmessage_window' and not restore_minimized:
-                    backend.close()
                 self.notice='輸入已送出；等待遊戲日誌確認。'
                 deadline=time.monotonic()+4
                 confirmed=False
@@ -311,6 +331,14 @@ class Panel:
                         win.minimize(hwnd)
                     record['minimized_after']=win.minimized(hwnd)
                     record['client_rect_final']=list(win.client_rect(hwnd))
+                except Exception as exc:
+                    record['window_cleanup_error']=str(exc)
+            if hidden_window is not None:
+                try:
+                    hidden_window.close(restore_minimized)
+                    record['client_rect_final']=list(win.client_rect(hwnd))
+                    record['foreground_final']=win.foreground(hwnd)
+                    record['cursor_final']=list(win.cursor())
                 except Exception as exc:
                     record['window_cleanup_error']=str(exc)
             if not record['sent'] and 'error' not in record:

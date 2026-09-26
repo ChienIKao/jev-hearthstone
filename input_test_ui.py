@@ -11,7 +11,7 @@ METHODS={
     'Maa PostMessage（不移動視窗）':('maa_postmessage','MaaFramework 普通 PostMessage，含官方啟用訊息流程；不啟用位置對齊。'),
     'PostMessage（背景訊息）':('postmessage','不移動游標。先前未確認成功，仍可重新測試。'),
     'AnchoredTouch（背景觸控）':('anchored_touch','不移動游標；可能閃爍。先前未確認成功，仍可重新測試。'),
-    '視窗對齊 SendMessage':('sendmessage_window','不移動游標，會短暫移動遊戲視窗；曾確認點擊和拖牌成功。'),
+    '視窗對齊 SendMessage':('sendmessage_window','操作期間暫時隱藏遊戲，復位後才顯示；不移動游標。跨螢幕縮放穩定後才出手。'),
     'SendInput（前景對照）':('sendinput','會操作實體滑鼠；倒數後需切回爐石。'),
 }
 
@@ -47,6 +47,7 @@ class InputTestWindow:
         ttk.Button(row,text='重新讀取合法動作',command=self.refresh).pack(side='left')
         ttk.Button(row,text='開始測試（3 秒後）',command=self.start).pack(side='left',padx=8)
         ttk.Button(row,text='停止／F8',command=panel.stop).pack(side='left')
+        ttk.Button(row,text='遊戲視窗復位',command=panel.restore_game_window).pack(side='left',padx=8)
         self.status=tk.StringVar(value='尚未開始；開啟此視窗不會操作遊戲。')
         ttk.Label(frame,textvariable=self.status,wraplength=880,foreground='#97410b').pack(anchor='w',pady=8)
         ttk.Label(frame,text='結果：API 已返回 ≠ 遊戲已執行。日誌確認與你目視的結果分開記錄。',wraplength=880).pack(anchor='w')
@@ -78,7 +79,7 @@ class InputTestWindow:
             state=read_state(self.panel.root_path/'state.json')
             actions,_=get_actions(state,self.panel.cards)
             self.actions={f'{a["description"]}  [{key}]':dict(a,_game_serial=state.get('game_serial')) for key,a in actions.items()
-                          if a['kind']!='end_turn' and not (a['kind']=='play' and a.get('card_type')=='MINION' and a.get('target_id'))}
+                          if not (a['kind']=='play' and a.get('card_type')=='MINION' and a.get('target_id'))}
             self.action_box['values']=list(self.actions)
             self.action.set(next(iter(self.actions),''))
             self.status.set('選好後端與動作後，按「開始測試」。' if self.actions else '目前沒有可測動作；等我方回合再重新讀取。')

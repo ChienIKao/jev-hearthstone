@@ -1,5 +1,5 @@
 import unittest
-from strategy import rank_actions, max_spend
+from strategy import rank_actions, max_spend, get_actions, card_cost
 
 
 def unit(key, side, attack=3, health=3, **tags):
@@ -22,6 +22,22 @@ def option(idx,source,targets):
 
 
 class StrategyTests(unittest.TestCase):
+    def test_zero_cost_coin_without_cost_tag_is_playable_at_zero_mana(self):
+        state,cards=fixture([],[],[option(0,50,[])])
+        state['players'][0]['mana']=0
+        state['players'][0]['hand']=[{'id':50,'card_id':'GAME_005','tags':{'CONTROLLER':'1','CARDTYPE':'SPELL','ZONE':'HAND'}}]
+        cards['GAME_005']={'cost':0,'type':'SPELL','name':'幸運幣'}
+        actions,unsupported=get_actions(state,cards)
+        self.assertIn('o0',actions)
+        self.assertEqual(actions['o0']['cost'],0)
+        self.assertEqual(unsupported,[])
+
+    def test_cost_tags_override_zero_base_and_unknown_cost_stays_unknown(self):
+        cards={'coin':{'cost':0},'paid':{'cost':5}}
+        self.assertEqual(card_cost({'card_id':'coin','tags':{'COST':'2'}},cards),2)
+        self.assertEqual(card_cost({'card_id':'paid','tags':{'COST':'0'}},cards),0)
+        self.assertIsNone(card_cost({'card_id':'paid','tags':{}},cards))
+
     def test_two_attacks_find_lethal(self):
         state,cards=fixture([unit(1,'1',4),unit(2,'1',3)],[],[option(0,1,[102]),option(1,2,[102])],7)
         lethal=rank_actions(state,cards)['lethal']
