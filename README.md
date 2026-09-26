@@ -56,9 +56,9 @@
 
 ## 背景輸入實驗
 
-面板預設勾選 PostMessage 背景輸入，只允許單步。它將視窗客戶區座標送至遊戲訊息佇列，不移動實體游標、不主動切換前景。訊息送出不代表遊戲接受；日誌未確認時停止，不回退到搶滑鼠模式。Windows 爐石相容性仍待實測。
+面板預設勾選背景輸入，只允許單步；下拉選單可選 anchored_touch 或 postmessage。以下描述 PostMessage。它將視窗客戶區座標送至遊戲訊息佇列，不移動實體游標、不主動切換前景。訊息送出不代表遊戲接受；日誌未確認時停止，不回退到搶滑鼠模式。Windows 爐石相容性仍待實測。
 
-參考 MaaFramework 的 Win32 控制方法分類與 Microsoft PostMessage 文件；本專案目前自行實作 PostMessage 後端，未整合 MaaFramework 或 AnchoredTouch。
+參考 MaaFramework 的 Win32 控制方法分類與 Microsoft PostMessage 文件；本專案有自行實作的 PostMessage 後端，以及 MaaFramework 5.14.0 的 AnchoredTouch 觸控後端。AnchoredTouch 不移動游標，但目標受遮擋時可能短暫閃爍。兩種後端均不自動回退至實體滑鼠。
 - https://github.com/MaaXYZ/MaaFramework/blob/main/docs/en_us/2.4-ControlMethods.md
 - https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew
 
@@ -67,3 +67,6 @@
 使用 Python 3.12 建立 `.venv`，安裝 `requirements.txt`；CUDA 版本的 PyTorch 請依本機 GPU 選擇官方套件。將 `config.example.json` 複製成 `config.json`，填寫自己的 BattleTag。`reader.py --logs` 可指定 Hearthstone Logs 路徑，預設為 `D:\Battle.net\Hearthstone\Logs`。
 
 從 https://api.hearthstonejson.com/v1/253216/zhTW/cards.json 下載卡牌資料至 `data/cards.zhTW.json`。模型使用 `convaiinnovations/laya`；首次需先下載至專案 `.cache/huggingface`，目前 advisor 預設離線載入。模型、卡牌資料、校準、玩家設定及對局紀錄均不包含在 repository。
+
+
+背景輸入診斷紀錄：實際測試過 PostMessage 拖牌，4 秒內日誌未確認；固定英雄位置背景右鍵未見選單，正常右鍵可見選單。這只能說本次 PostMessage 路徑未驗證成功，尚未確定內部原因。AnchoredTouch 已接入，真實對局成功與否需另行驗證。測試套件只驗證訊息、座標、停止時釋放觸點等程式行為，不能代替遊戲相容性測試。

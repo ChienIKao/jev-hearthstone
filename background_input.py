@@ -32,6 +32,15 @@ class BackgroundInput:
         finally:
             self.send(0x202,point)
 
+    def right_click(self,point,check):
+        check()
+        self.send(0x200,point)
+        self.send(0x204,point,2)
+        try:
+            self.sleep(.05)
+        finally:
+            self.send(0x205,point)
+
     def drag(self,start,end,check):
         check()
         self.send(0x200,start)

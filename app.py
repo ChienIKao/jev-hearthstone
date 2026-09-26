@@ -46,6 +46,7 @@ class Panel:
         self.detail=tk.StringVar(value='')
         self.method=tk.StringVar(value='')
         self.background=tk.BooleanVar(value=True)
+        self.background_method=tk.StringVar(value='anchored_touch')
         self._ui()
         self.root.protocol('WM_DELETE_WINDOW',self.close)
         self.root.after(150,self.tick)
@@ -61,7 +62,9 @@ class Panel:
         ttk.Label(frame,textvariable=self.method,wraplength=730).pack(anchor='w',pady=5)
         ttk.Label(frame,textvariable=self.detail,wraplength=730).pack(anchor='w')
         row=ttk.Frame(frame)
-        ttk.Checkbutton(frame,text='背景輸入實驗（PostMessage，不移動滑鼠；先用單步測試）',variable=self.background).pack(anchor='w')
+        ttk.Checkbutton(frame,text='背景輸入實驗（不移動滑鼠；先用單步測試）',variable=self.background).pack(anchor='w')
+        ttk.Combobox(frame,textvariable=self.background_method,values=('anchored_touch','postmessage'),state='readonly').pack(anchor='w')
+        ttk.Button(frame,text='背景診斷：開啟英雄表情選單',command=self.probe_background).pack(anchor='w')
         row.pack(fill='x',pady=15)
         ttk.Button(row,text='校準座標',command=self.calibrate).pack(side='left',padx=(0,8))
         ttk.Button(row,text='只做一步',command=lambda:self.arm(False)).pack(side='left',padx=8)
@@ -121,6 +124,20 @@ class Panel:
         self.stop_event.set()
         self.notice='已停止；目前只觀察局面。'
 
+    def probe_background(self):
+        self.stop()
+        if self.worker and self.worker.is_alive():
+            self.notice='請等目前動作停止後再診斷。'
+            return
+        try:
+            hwnd=win.find_game()
+            _,_,w,h=win.client_rect(hwnd)
+            point=tuple(round(v*s) for v,s in zip(self.layout['hero_me'],(w,h)))
+            BackgroundInput(hwnd).right_click(point,lambda:None)
+            self.notice='已送背景右鍵；請核對英雄表情選單是否出現，尚未認定成功。'
+        except Exception as exc:
+            self.notice=str(exc)
+
     def close(self):
         self.stop_event.set()
         self.root.destroy()
@@ -132,10 +149,11 @@ class Panel:
             messagebox.showinfo('先校準','先按「校準座標」，檢查標記落在卡牌與按鈕中心。')
             return
         self.stop_event.clear()
-        self.worker=threading.Thread(target=self.run,args=(continuous,self.background.get()),daemon=True)
+        self.worker=threading.Thread(target=self.run,args=(continuous,self.background.get(),self.background_method.get()),daemon=True)
         self.worker.start()
 
-    def run(self,continuous,background=False):
+    def run(self,continuous,background=False,method='postmessage'):
+        backend=None
         try:
             if background and continuous:
                 raise ValueError('背景輸入目前只開放單步驗證，請按「只做一步」')
@@ -143,7 +161,11 @@ class Panel:
             if self.stop_event.wait(3):
                 return
             hwnd=win.find_game()
-            backend=BackgroundInput(hwnd) if background else win
+            if background and method=='anchored_touch':
+                from maa_input import MaaTouchInput
+                backend=MaaTouchInput(hwnd)
+            else:
+                backend=BackgroundInput(hwnd) if background else win
             seen=None
             stable_since=time.monotonic()
             self.last_pointer=win.cursor()
@@ -212,7 +234,7 @@ class Panel:
                         confirmed=True
                         break
                     self.stop_event.wait(0.1)
-                record={'time':time.time(),'backend':'postmessage' if background else 'sendinput','action':action,'confirmed':confirmed,'before_fingerprint':stamp}
+                record={'time':time.time(),'backend':method if background else 'sendinput','action':action,'confirmed':confirmed,'before_fingerprint':stamp,'plan':plan,'client_rect':[x,y,width,height]}
                 with (ROOT/'execution.jsonl').open('a',encoding='utf-8') as stream:
                     stream.write(json.dumps(record,ensure_ascii=False)+'\n')
                 if not confirmed:
@@ -227,6 +249,11 @@ class Panel:
             self.notice=str(exc)
         finally:
             self.stop_event.set()
+            if backend is not None and hasattr(backend,'close'):
+                try:
+                    backend.close()
+                except Exception as exc:
+                    self.notice=f'觸控清理失敗：{exc}'
 
     def calibrate(self):
         self.stop()
