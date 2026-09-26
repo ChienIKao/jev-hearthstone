@@ -1,0 +1,11 @@
+*
+!*.py
+!README.md
+!.gitignore
+!requirements.txt
+!config.example.json
+!start.cmd
+!start.ps1
+!stop.cmd
+!stop.ps1
+__pycache__/
