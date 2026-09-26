@@ -7,8 +7,8 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from advisor import fingerprint, read_state
-from executor import DEFAULT_LAYOUT, point_for, validate, build_plan, action_succeeded
-from strategy import sides, entity_map, name_of
+from executor import DEFAULT_LAYOUT, point_for, validate, build_plan, action_succeeded, window_matches
+from strategy import sides, entity_map, name_of, get_actions
 from geometry import hand_points
 from background_input import BackgroundInput
 import win_input as win
@@ -46,9 +46,12 @@ class Panel:
         self.detail=tk.StringVar(value='')
         self.method=tk.StringVar(value='')
         self.background=tk.BooleanVar(value=True)
-        self.background_method=tk.StringVar(value='anchored_touch')
+        self.background_method=tk.StringVar(value='sendmessage_window')
         self._ui()
         self.root.protocol('WM_DELETE_WINDOW',self.close)
+        self.root.bind('<F6>',lambda _:self.calibrate())
+        self.root.bind('<F7>',lambda _:self.arm(False))
+        self.root.bind('<F9>',lambda _:self.arm(False,'hero_power'))
         self.root.after(150,self.tick)
 
     def _ui(self):
@@ -63,7 +66,7 @@ class Panel:
         ttk.Label(frame,textvariable=self.detail,wraplength=730).pack(anchor='w')
         row=ttk.Frame(frame)
         ttk.Checkbutton(frame,text='背景輸入實驗（不移動滑鼠；先用單步測試）',variable=self.background).pack(anchor='w')
-        ttk.Combobox(frame,textvariable=self.background_method,values=('anchored_touch','postmessage'),state='readonly').pack(anchor='w')
+        ttk.Combobox(frame,textvariable=self.background_method,values=('anchored_touch','postmessage','sendmessage_window'),state='readonly').pack(anchor='w')
         ttk.Button(frame,text='背景診斷：開啟英雄表情選單',command=self.probe_background).pack(anchor='w')
         row.pack(fill='x',pady=15)
         ttk.Button(row,text='校準座標',command=self.calibrate).pack(side='left',padx=(0,8))
@@ -142,17 +145,17 @@ class Panel:
         self.stop_event.set()
         self.root.destroy()
 
-    def arm(self,continuous):
+    def arm(self,continuous,preferred=None):
         if self.worker and self.worker.is_alive():
             return
         if not self.layout.get('confirmed'):
             messagebox.showinfo('先校準','先按「校準座標」，檢查標記落在卡牌與按鈕中心。')
             return
         self.stop_event.clear()
-        self.worker=threading.Thread(target=self.run,args=(continuous,self.background.get(),self.background_method.get()),daemon=True)
+        self.worker=threading.Thread(target=self.run,args=(continuous,self.background.get(),self.background_method.get(),preferred),daemon=True)
         self.worker.start()
 
-    def run(self,continuous,background=False,method='postmessage'):
+    def run(self,continuous,background=False,method='postmessage',preferred=None):
         backend=None
         try:
             if background and continuous:
@@ -161,9 +164,9 @@ class Panel:
             if self.stop_event.wait(3):
                 return
             hwnd=win.find_game()
-            if background and method=='anchored_touch':
+            if background and method in ('anchored_touch','sendmessage_window'):
                 from maa_input import MaaTouchInput
-                backend=MaaTouchInput(hwnd)
+                backend=MaaTouchInput(hwnd,method)
             else:
                 backend=BackgroundInput(hwnd) if background else win
             seen=None
@@ -180,6 +183,13 @@ class Panel:
                 if state.get('game_state')!='RUNNING':
                     raise ValueError('對局已結束，已停止')
                 stamp=fingerprint(state)
+                if preferred:
+                    try:
+                        legal,_=get_actions(state,self.cards)
+                    except ValueError:
+                        legal={}
+                    matches=[a for a in legal.values() if a['kind']==preferred and not a.get('target_id')]
+                    advice={'status':'suggestion','state_fingerprint':stamp,'action':matches[0]} if len(matches)==1 else {'status':'waiting'}
                 if stamp!=seen:
                     seen,stable_since=stamp,time.monotonic()
                 if time.monotonic()-stable_since<0.3:
@@ -209,7 +219,9 @@ class Panel:
                         raise ValueError('已停止')
                     if not background and not win.foreground(hwnd):
                         raise ValueError('遊戲失去焦點，已停止')
-                    if win.client_rect(hwnd)!=(x,y,width,height):
+                    current_rect=win.client_rect(hwnd)
+                    expected_rect=(x,y,width,height)
+                    if not window_matches(current_rect,expected_rect,background and method=='sendmessage_window'):
                         raise ValueError('遊戲視窗移動或尺寸改變，已停止')
                 def pixel(point):
                     if not point or not all(0.01<=v<=0.99 for v in point):

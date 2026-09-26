@@ -4,6 +4,10 @@ from geometry import hand_points, board_points
 from advisor import fingerprint
 from strategy import entity_map, get_actions, sides
 
+
+def window_matches(current,expected,allow_translation=False):
+    return current[2:]==expected[2:] if allow_translation else current==expected
+
 DEFAULT_LAYOUT = {
     'confirmed':False, 'width':0, 'height':0,
     'hero_me':[0.50,0.765], 'hero_enemy':[0.50,0.20],

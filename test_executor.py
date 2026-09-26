@@ -1,13 +1,20 @@
 import copy
 import time
 import unittest
-from executor import DEFAULT_LAYOUT, validate, build_plan, action_succeeded
+from executor import DEFAULT_LAYOUT, validate, build_plan, action_succeeded, window_matches
 from advisor import fingerprint
 from strategy import get_actions
 from test_strategy import fixture, unit, option
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_window_alignment_allows_translation_but_not_resize(self):
+        before=(9,32,1902,991)
+        translated=(-500,-200,1902,991)
+        self.assertTrue(window_matches(translated,before,True))
+        self.assertFalse(window_matches(translated,before,False))
+        self.assertFalse(window_matches((-500,-200,1280,720),before,True))
+
     def setup_action(self):
         state,cards=fixture([unit(1,'1',3,4,ZONE_POSITION=1)],[],[option(0,1,[102])])
         state['observed_at']=time.time()

@@ -3,11 +3,12 @@ import time
 
 
 class MaaTouchInput:
-    def __init__(self,hwnd):
+    def __init__(self,hwnd,method='anchored_touch'):
         from maa.controller import Win32Controller
         from maa.define import MaaWin32InputMethodEnum as Input, MaaWin32ScreencapMethodEnum as Capture
+        methods={'anchored_touch':Input.AnchoredTouch,'sendmessage_window':Input.SendMessageWithWindowPos}
         self.controller=Win32Controller(hwnd,screencap_method=Capture.FramePool,
-                                        mouse_method=Input.AnchoredTouch,keyboard_method=Input.PostMessage)
+                                        mouse_method=methods[method],keyboard_method=Input.PostMessage)
         self.controller.set_screenshot_use_raw_size(True)
         self._wait(self.controller.post_connection())
 
