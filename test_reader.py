@@ -2,6 +2,16 @@ import unittest
 from reader import State
 
 class ReaderTests(unittest.TestCase):
+    def test_choice_records_the_turn_it_was_offered(self):
+        state=State()
+        for line in ('CREATE_GAME','GameEntity EntityID=1','tag=CARDTYPE value=GAME','tag=TURN value=9',
+                     'Player EntityID=2','tag=CARDTYPE value=PLAYER','tag=PLAYER_ID value=1'):
+            state.feed('GameState.DebugPrintPower() - '+line)
+        state.feed('GameState.DebugPrintEntityChoices() - id=3 Player=2 TaskList=0 ChoiceType=GENERAL CountMin=1 CountMax=1')
+        state.feed('GameState.DebugPrintEntityChoices() - Entities[0]=94')
+        state.feed('')
+        self.assertEqual(state.snapshot()['choices']['1']['offered_turn'],'9')
+
     def test_public_plays_wait_for_reveal_and_survive_transform(self):
         state=State()
         def feed(text):state.feed('GameState.DebugPrintPower() - '+text)

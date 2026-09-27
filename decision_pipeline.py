@@ -10,6 +10,9 @@ class ContextBudgetError(ValueError):
     pass
 
 
+HEURISTIC_LOG_WEIGHT=2.5
+
+
 def predict_choice(router, context, question):
     agent=router.load('multilingual')
     tok=agent.tok
@@ -161,7 +164,7 @@ def staged_action(state,cards,profile,choose,action_scores=None):
             if hi>lo:
                 # A bounded soft preference, never a legality filter: a strong
                 # model preference can outweigh the entire heuristic range.
-                combined={key:math.log(max(float(probabilities[key]),1e-9))+(score-lo)/(hi-lo)
+                combined={key:math.log(max(float(probabilities[key]),1e-9))+HEURISTIC_LOG_WEIGHT*(score-lo)/(hi-lo)
                           for key,score in prior.items()}
                 selected=max(combined,key=combined.get)
         remaining=mapping[selected]

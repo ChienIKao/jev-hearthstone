@@ -33,6 +33,14 @@ class StagedDecisionTests(unittest.TestCase):
         self.assertEqual(action['kind'],'end_turn')
         self.assertFalse(trace[0]['heuristic_adjusted'])
 
+    def test_split_development_choices_can_outweigh_pass_preference(self):
+        state,cards=fixture([unit(1,'1'),unit(3,'1')],[],[option(0,1,[102]),option(1,3,[102])])
+        def choose(context,question):
+            return dict(choice='a2',probabilities={'a0':.126,'a1':.126,'a2':.748}),{}
+        action,trace=staged_action(state,cards,None,choose,{'o0t0':3.8,'o1t0':5.35,'o99':-3})
+        self.assertEqual(action['entity_id'],3)
+        self.assertTrue(trace[0]['heuristic_adjusted'])
+
     def test_context_heavy_options_are_compared_in_pairs(self):
         from unittest.mock import patch
         from decision_pipeline import ContextBudgetError

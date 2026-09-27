@@ -10,6 +10,15 @@ from unittest.mock import patch
 
 
 class ChoiceTests(unittest.TestCase):
+    def test_server_timeout_expires_choice_without_local_send(self):
+        state=self.state();state['turn']='9'
+        packet=state['choices']['1'];packet['offered_turn']='9'
+        self.assertTrue(choice_actions(state,{}))
+        state['turn']='10'
+        self.assertEqual(choice_actions(state,{}),{})
+        packet['offered_turn']='10';packet['revision']=99
+        self.assertTrue(choice_actions(state,{}))
+
     def state(self):
         return dict(game_serial='game',local_controller='1',choices={'1':dict(
             id=3,type='GENERAL',complete=True,count_min=1,count_max=1,entities=[89,90,91],

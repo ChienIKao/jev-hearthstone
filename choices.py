@@ -5,6 +5,10 @@ def pending_choice(state):
     packet = state.get('choices', {}).get(state.get('local_controller'))
     if not packet or packet.get('type') == 'MULLIGAN':
         return None
+    # Timed-out decisions can resolve on the server without SendChoices. A new
+    # turn invalidates that offer; a new offer carries its own revision/turn.
+    if packet.get('offered_turn') is not None and state.get('turn') is not None and str(packet['offered_turn'])!=str(state['turn']):
+        return None
     sent = state.get('sent_choice') or {}
     if (sent.get('id') == packet['id'] and sent.get('type') == packet['type']
             and sent.get('revision',0)>=packet.get('revision',0)):

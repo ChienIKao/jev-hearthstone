@@ -78,7 +78,9 @@ class State:
                 player = self.resolve(head[2])
                 controller = self.entities.get(player, {}).get('tags', {}).get('PLAYER_ID')
                 self.choice_current = dict(id=int(head[1]), type=head[3], entities=[], complete=False, revision=self.revision)
+                game=next((e['tags'] for e in self.entities.values() if e['tags'].get('CARDTYPE')=='GAME'),{})
                 if head[3] != 'MULLIGAN':
+                    if game.get('TURN') is not None:self.choice_current['offered_turn']=game['TURN']
                     self.choice_current.update(count_min=int(head[4]), count_max=int(head[5]))
                 if controller:
                     self.choices[controller] = self.choice_current
