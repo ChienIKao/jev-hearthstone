@@ -3,10 +3,47 @@ import unittest
 from test_strategy import fixture,unit
 from card_simulator import simulate_card,card_plans,PLAIN_BODIES
 from test_strategy import option
-from turn_search import COMBAT_INERT
+from turn_search import COMBAT_INERT, PREFIX_WEAPONS
 
 
 class CardSimulationTests(unittest.TestCase):
+    def test_dormant_dragon_and_location_are_not_combat_targets(self):
+        state,cards=fixture([unit(1,'1',3,3,EXHAUSTED=0)],[],[option(0,1,[102])])
+        dragon=unit(2,'2',8,8,DORMANT=1,TAUNT=1);dragon['card_id']='TIME_063'
+        location=unit(3,'2');location['card_id']='CATA_584'
+        location['tags']['CARDTYPE']='LOCATION';location['tags'].pop('HEALTH')
+        state['players'][1]['board']=[dragon,location]
+        for e in (dragon,location):cards[e['card_id']]={'text':COMBAT_INERT[e['card_id']]}
+        for target in (2,3):
+            self.assertIsNone(simulate_card(state,dict(kind='attack',entity_id=1,target_id=target),cards).state)
+        after=simulate_card(state,dict(kind='attack',entity_id=1,target_id=102),cards).state
+        self.assertEqual([e['id'] for e in after['players'][1]['board']],[2,3])
+        self.assertEqual(after['players'][1]['heroes'][0]['tags']['DAMAGE'],'3')
+
+    def test_own_dormant_dragon_stops_card_play_forecast(self):
+        state,cards,action=self.dragon()
+        dormant=unit(2,'1',8,8,DORMANT=1);dormant['card_id']='TIME_063'
+        state['players'][0]['board']=[dormant]
+        cards['TIME_063']={'text':COMBAT_INERT['TIME_063']}
+        result=simulate_card(state,action,cards)
+        self.assertIsNone(result.state)
+        self.assertIn('甦醒',result.boundary)
+
+    def test_known_weapon_and_cannon_do_not_trigger_during_minion_attack(self):
+        state,cards=fixture([unit(1,'1',2,2,EXHAUSTED=0)],[],[option(0,1,[102])],enemy_health=3)
+        cannon=unit(2,'1',1,1,EXHAUSTED=1);cannon['card_id']='CAP_107t'
+        state['players'][0]['board'].append(cannon)
+        cards['CAP_107t']={'text':COMBAT_INERT['CAP_107t']}
+        weapon=unit(3,'1');weapon.update(card_id='TLC_833');weapon['tags']['CARDTYPE']='WEAPON'
+        state['players'][0]['weapons']=[weapon]
+        cards['TLC_833']={'text':PREFIX_WEAPONS['TLC_833']}
+        plans=card_plans(state,cards,time_budget=1)
+        self.assertTrue(plans)
+        self.assertFalse(any(p['lethal'] for p in plans))
+        self.assertIn('敵英雄 1',plans[0]['summary'])
+        cards['TLC_833']['text']='Whenever a minion attacks, deal 1 damage'
+        self.assertEqual(card_plans(state,cards,time_budget=1),[])
+
     def test_battlecry_clears_taunt_before_face_attack(self):
         state,cards,action=self.dragon()
         attacker=unit(8,'1',6,6,EXHAUSTED=0)

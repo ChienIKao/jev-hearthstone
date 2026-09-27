@@ -80,7 +80,7 @@ class Decider:
     def decide(self,state):
         start=time.monotonic()
         from strategy import sides, get_actions, name_of, text_of
-        from decision_pipeline import predict_choice, staged_action
+        from decision_pipeline import predict_choice, staged_action, ContextBudgetError
         own, _ = sides(state)
         from choices import pending_choice
         packet = pending_choice(state)
@@ -124,11 +124,16 @@ class Decider:
         result={'evaluation':evaluation,'model_answer':None,'device':self.device}
         from turn_search import combat_plans
         from card_simulator import card_plans
-        plans=combat_plans(state,self.cards,limit=3)+card_plans(state,self.cards)
+        plans=combat_plans(state,self.cards,limit=3)+card_plans(state,self.cards,max_depth=16,beam_width=32,time_budget=.06)
         result['search_plans']=plans
+        certified=next((p for p in plans if p['lethal']),None)
         if evaluation['lethal']:
             chosen=evaluation['lethal']['action']
             method='rules_lethal'
+        elif certified:
+            chosen=certified['action']
+            result['lethal_certificate']=certified
+            method='rules_search_lethal'
         elif len(get_actions(state,self.cards)[0])==1:
             chosen=next(iter(get_actions(state,self.cards)[0].values()))
             method='rules_single'
@@ -140,10 +145,13 @@ class Decider:
                 plan_options['other']='改選出牌、技能或其他合法動作'
                 context=compact_state(state,self.cards)
                 context['deck_strategy']=strategy_context(self.profile)
-                answer,budget=predict_choice(self.router,context,{'move':dict(type='choice',
-                    instructions='比較已建模的動作結果；這些不是完整回合。也可選其他動作。',criteria=plan_options)})
-                result['plan_selection']=dict(answer=answer,budget=budget)
-                if answer['choice']!='other':selected_plan=plans[int(answer['choice'][1:])]
+                try:
+                    answer,budget=predict_choice(self.router,context,{'move':dict(type='choice',
+                        instructions='比較已建模的動作結果；這些不是完整回合。也可選其他動作。',criteria=plan_options)})
+                    result['plan_selection']=dict(answer=answer,budget=budget)
+                    if answer['choice']!='other':selected_plan=plans[int(answer['choice'][1:])]
+                except ContextBudgetError:
+                    result['plan_selection']=dict(skipped='context_budget',fallback='staged_action')
             if selected_plan:
                 chosen,trace=selected_plan['action'],[]
             else:

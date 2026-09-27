@@ -3,7 +3,7 @@ import copy
 import time
 from dataclasses import dataclass
 from strategy import sides, entity_map, card_cost, number, hp, text_of, vanilla, get_actions, name_of
-from turn_search import combat_inert, COMBAT_INERT
+from turn_search import combat_inert, COMBAT_INERT, passive_weapons_known
 
 PLAIN_BODIES={'CORE_NEW1_023':'飄渺',
               'END_033':'飄渺若你手中有其他龍類，消耗減少(3)'}
@@ -18,7 +18,7 @@ class Transition:
 def simulate_card(state,action,cards):
     """Consume an already legal action; never infer random cards or deck order."""
     own,enemy=sides(state)
-    if state.get('enchantments') or any(p.get('secret_count',0) or p.get('weapons') for p in (own,enemy)):
+    if state.get('enchantments') or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
         return Transition(None,'秘密、武器或附魔效果尚未模擬')
     if any(not combat_inert(e,cards) for p in (own,enemy) for e in p['board']):
         return Transition(None,'場上有尚未建模的觸發效果')
@@ -35,6 +35,8 @@ def simulate_card(state,action,cards):
     text=''.join(text_of(source,cards).split())
     adapter=None
     if action['kind']=='play':
+        if any(e.get('card_id')=='TIME_063' and number(e,'DORMANT') and not number(e,'SILENCED') for e in own['board']):
+            return Transition(None,'出牌可能使休眠龍提早甦醒')
         if source['tags'].get('ZONE')!='HAND':return Transition(None,'卡牌已不在手中')
         if source['tags'].get('CARDTYPE')=='MINION':
             if len(own['board'])>=7:return Transition(None,'場面已滿')
@@ -55,7 +57,7 @@ def simulate_card(state,action,cards):
         target=entities.get(action.get('target_id'))
         if target is None or target['tags'].get('ZONE')!='PLAY' or target['tags'].get('CARDTYPE') not in ('MINION','HERO'):
             return Transition(None,'戰吼目標已失效')
-        if any(number(target,t) for t in ('IMMUNE','CANT_BE_DAMAGED','DORMANT')):
+        if any(number(target,t) for t in ('IMMUNE','CANT_BE_DAMAGED','DORMANT')) or (number(target,'STEALTH') and target['tags'].get('CONTROLLER')!=own['controller']):
             return Transition(None,'目標有尚未建模的保護效果')
     after=copy.deepcopy(state)
     me,foe=sides(after)
@@ -86,7 +88,7 @@ def simulate_card(state,action,cards):
                 target['tags']['DAMAGE']=str(number(target,'DAMAGE')+5-absorbed)
             hero=me['heroes'][0]
             hero['tags']['ARMOR']=str(number(hero,'ARMOR')+5)
-            for player in (me,foe):player['board']=[e for e in player['board'] if hp(e)>0]
+            for player in (me,foe):player['board']=[e for e in player['board'] if e['tags'].get('CARDTYPE')!='MINION' or number(e,'DORMANT') or hp(e)>0]
     for player in (me,foe):
         for zone in ('hand','board'):
             for index,e in enumerate(player[zone],1):e['tags']['ZONE_POSITION']=str(index)
@@ -114,15 +116,16 @@ def simulate_attack(state,action):
     entities=entity_map(state)
     source=entities.get(action.get('entity_id'));target=entities.get(action.get('target_id'))
     if source is None or target is None:return Transition(None,'攻擊來源或目標已不存在')
-    if source not in own['board'] or target not in enemy['board']+enemy['heroes']:
+    if source not in own['board'] or source['tags'].get('CARDTYPE')!='MINION' or target not in enemy['board']+enemy['heroes'] or target['tags'].get('CARDTYPE') not in ('MINION','HERO'):
         return Transition(None,'只模擬我方手下攻擊敵方角色')
-    blocked=('IMMUNE','CANT_BE_DAMAGED','DORMANT','CANT_BE_ATTACKED','STEALTH',
+    if number(source,'DORMANT') or number(target,'DORMANT'):return Transition(None,'休眠手下不參與戰鬥')
+    blocked=('IMMUNE','CANT_BE_DAMAGED','CANT_BE_ATTACKED','STEALTH',
              'DEATHRATTLE','REBORN','LIFESTEAL','CANT_ATTACK','CANT_ATTACK_HEROES')
     if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes'] for t in blocked):
         return Transition(None,'尚未建模的攻擊限制或觸發')
     if source['tags'].get('EXHAUSTED')!='0' or number(source,'FROZEN') or number(source,'ATK')<=0:
         return Transition(None,'攻擊者未確認可攻擊')
-    taunts=[e for e in enemy['board'] if number(e,'TAUNT')]
+    taunts=[e for e in enemy['board'] if number(e,'TAUNT') and not number(e,'DORMANT')]
     if taunts and target not in taunts:return Transition(None,'仍有嘲諷')
     hero_target=target['tags'].get('CARDTYPE')=='HERO'
     if hero_target and number(source,'RUSH') and number(source,'NUM_TURNS_IN_PLAY')==0 and not number(source,'CHARGE'):
@@ -141,7 +144,7 @@ def simulate_attack(state,action):
     src['tags']['NUM_ATTACKS_THIS_TURN']=str(attacks)
     src['tags']['EXHAUSTED']='1' if attacks>=(2 if number(src,'WINDFURY') else 1) else '0'
     for player in (me,foe):
-        player['board']=[e for e in player['board'] if hp(e)>0]
+        player['board']=[e for e in player['board'] if e['tags'].get('CARDTYPE')!='MINION' or number(e,'DORMANT') or hp(e)>0]
         for index,e in enumerate(player['board'],1):e['tags']['ZONE_POSITION']=str(index)
     after['options']=[];after['options_fresh']=False
     return Transition(after)
@@ -180,9 +183,10 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
     def evaluate(snapshot,action,sequence):
         own,enemy=sides(snapshot)
         health=hp(enemy['heroes'][0])+number(enemy['heroes'][0],'ARMOR')
-        friendly=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in own['board']) or '空'
-        hostile=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in enemy['board']) or '空'
-        score=sum(number(e,'ATK')*1.3+hp(e)*.5 for e in own['board'])-sum(number(e,'ATK')*1.3+hp(e)*.5 for e in enemy['board'])-health*.8+number(own['heroes'][0],'ARMOR')*.2
+        def active(player):return [e for e in player['board'] if e['tags'].get('CARDTYPE')=='MINION' and not number(e,'DORMANT')]
+        friendly=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in active(own)) or '空'
+        hostile=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in active(enemy)) or '空'
+        score=sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(own))-sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(enemy))-health*.8+number(own['heroes'][0],'ARMOR')*.2
         if hp(own['heroes'][0])<=0:score=-100000
         elif health<=0:score=100000
         return dict(action=action,sequence=sequence,score=score,

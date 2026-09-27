@@ -5,6 +5,10 @@ from strategy import compact_state, get_actions, entity_map, name_of
 from deck_profiles import strategy_context
 
 
+class ContextBudgetError(ValueError):
+    pass
+
+
 def predict_choice(router, context, question):
     agent=router.load('multilingual')
     tok=agent.tok
@@ -46,7 +50,23 @@ def predict_choice(router, context, question):
             if details:payload['candidate_details']=details
             request={'move':dict(type='choice',instructions=brief,
                                 criteria={k:description(k,v) for k,v in group})}
-            answer,budget=_predict_batch(router,agent,payload,request,maximum,head)
+            try:
+                answer,budget=_predict_batch(router,agent,payload,request,maximum,head)
+            except ContextBudgetError:
+                if len(group)<=2:raise
+                # Long plans consume context as well as head tokens. Reduce the
+                # comparison width before sacrificing any candidate description.
+                finalists=[]
+                for start in range(0,len(group),2):
+                    pair=group[start:start+2]
+                    if len(pair)==1:finalists.extend(pair);continue
+                    sub_answer,sub_budget=predict_choice(router,context,{'move':dict(type='choice',instructions=instructions,criteria=dict(pair))})
+                    calls.extend(sub_budget['comparisons'])
+                    finalists.append((sub_answer['choice'],criteria[sub_answer['choice']]))
+                sub_answer,sub_budget=predict_choice(router,context,{'move':dict(type='choice',instructions=instructions,criteria=dict(finalists))})
+                calls.extend(sub_budget['comparisons'])
+                winners.append((sub_answer['choice'],criteria[sub_answer['choice']]))
+                continue
             calls.append(dict(choices=[k for k,_ in group],answer=answer,budget=budget))
             winners.append((answer['choice'],criteria[answer['choice']]))
         if len(winners)==1:
@@ -92,7 +112,7 @@ def _predict_batch(router,agent,context,question,maximum,head):
         value['card_columns']=['id','name','cost','attack','health','armor','status','effect','printed_races']
         reductions.append('compact_cards_and_text_'+str(limit))
     if count()>room:
-        raise ValueError('可見局面超出模型輸入預算，未截斷局面或候選')
+        raise ContextBudgetError('可見局面超出模型輸入預算，未截斷局面或候選')
     answer=router.predict(encoded(),question,model='multilingual',max_len=maximum,head_max_len=head)['answers']['move']
     if answer['choice'] not in q['criteria']:
         raise ValueError('模型輸出不在候選清單中')

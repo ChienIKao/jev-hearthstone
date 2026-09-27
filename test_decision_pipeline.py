@@ -19,6 +19,22 @@ def fake_agent():
 
 
 class StagedDecisionTests(unittest.TestCase):
+    def test_context_heavy_options_are_compared_in_pairs(self):
+        from unittest.mock import patch
+        from decision_pipeline import ContextBudgetError
+        router=Mock();router.load.return_value=fake_agent()
+        visited=[]
+        def batch(router,agent,context,question,maximum,head):
+            criteria=question['move']['criteria']
+            if len(criteria)>2:raise ContextBudgetError('budget')
+            visited.extend(criteria)
+            return {'choice':next(iter(criteria))},{'context_tokens':100}
+        with patch('decision_pipeline._predict_batch',side_effect=batch):
+            answer,budget=predict_choice(router,{}, {'move':dict(type='choice',instructions='choose',criteria={str(i):'short' for i in range(5)})})
+        self.assertEqual(set(visited),set('01234'))
+        self.assertEqual(answer['choice'],'0')
+        self.assertGreater(budget['comparison_calls'],1)
+
     def test_source_choice_describes_all_targets_without_preselecting_source(self):
         state,cards=fixture([unit(1,'1'),unit(3,'1')],[unit(2,'2')],
                             [option(0,1,[2,102]),option(1,3,[2,102])])

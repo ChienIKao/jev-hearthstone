@@ -4,7 +4,8 @@ import time
 from strategy import sides, number, hp, vanilla, get_actions, text_of
 
 
-# These printed effects resolve when played, not during minion combat.
+# These effects do not trigger during the supported action prefixes. End-turn
+# effects are deliberately outside a prefix forecast, including random cannons.
 # Exact text checks make a card-data update fall back to unknown effects.
 COMBAT_INERT={
     'CORE_NEW1_023':'飄渺',
@@ -14,7 +15,24 @@ COMBAT_INERT={
     'EDR_456':'戰吼：若你手中有龍類，發現一個有黑暗贈禮的龍類',
     'TLC_600':'戰吼：造成5點傷害並獲得5點護甲值同類：消耗減少(3)',
     'TIME_034':'倒轉戰吼：雙方裝備一把隨機武器，賦予你的武器+1/+1',
+    'CAP_107t':'在你的回合結束時，對一個隨機敵人造成1點傷害',
+    'CORE_NX2_028':'在你的英雄攻擊後，獲得4點護甲值並抽一張牌',
+    'CORE_ONY_018':'二選一：為你的英雄恢復#8點生命值，或造成4點傷害',
+    'TIME_063':'休眠5回合衝刺。在你打出最新資料片的牌後，提早1回合甦醒',
+    'CATA_584':'造成3點傷害，隨機分給敵人。若你本回合打過火焰法術，額外造成3點',
 }
+
+# These weapons have no effect during a minion attack or the supported card plays.
+PREFIX_WEAPONS={
+    'TLC_833':'在你的英雄攻擊後，召喚一個有衝刺的2/1蛆蟲',
+    'CORE_GVG_059':'戰吼：賦予一個隨機的友方手下聖盾術和嘲諷',
+}
+
+
+def passive_weapons_known(state,cards):
+    own,enemy=sides(state)
+    return all(PREFIX_WEAPONS.get(e.get('card_id'))==''.join(text_of(e,cards).split())
+               for p in (own,enemy) for e in p.get('weapons',[]))
 
 
 def combat_inert(entity,cards):
@@ -28,11 +46,11 @@ def combat_plans(state,cards,limit=5,beam_width=32,time_budget=.04):
     actions,unsupported=get_actions(state,cards)
     if unsupported or state.get('enchantments'):
         return []
-    if any(p.get('secret_count',0) or p.get('weapons') for p in (own,enemy)):
+    if any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
         return []
     if any(not combat_inert(e,cards) for e in own['board']+enemy['board']):
         return []
-    forbidden=('STEALTH','IMMUNE','CANT_BE_DAMAGED','CANT_BE_ATTACKED','DORMANT','REBORN','DEATHRATTLE','LIFESTEAL')
+    forbidden=('STEALTH','IMMUNE','CANT_BE_DAMAGED','CANT_BE_ATTACKED','REBORN','DEATHRATTLE','LIFESTEAL','CANT_ATTACK','CANT_ATTACK_HEROES')
     if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes'] for t in forbidden):
         return []
     attacks=[a for a in actions.values() if a['kind']=='attack' and a['card_type']=='MINION']
@@ -47,7 +65,8 @@ def combat_plans(state,cards,limit=5,beam_width=32,time_budget=.04):
                     taunt=bool(number(e,'TAUNT')),poison=bool(number(e,'POISONOUS')),
                     remaining=(max(0,2-number(e,'NUM_ATTACKS_THIS_TURN')) if number(e,'WINDFURY') else 1) if eligible else 0,
                     face=not number(e,'RUSH') or any(a['entity_id']==e['id'] and a['target_id']==hero['id'] for a in attacks))
-    start=dict(friendly=[unit(e) for e in own['board']],enemy=[unit(e) for e in enemy['board']],health=initial_health,steps=[])
+    def active(e):return e['tags'].get('CARDTYPE')=='MINION' and not number(e,'DORMANT')
+    start=dict(friendly=[unit(e) for e in own['board'] if active(e)],enemy=[unit(e) for e in enemy['board'] if active(e)],health=initial_health,steps=[])
     deadline=time.monotonic()+time_budget
     def score(node):
         if node['health']<=0:return 100000
