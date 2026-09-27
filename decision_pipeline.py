@@ -1,7 +1,7 @@
 """Bounded model requests and hierarchical selection of complete legal actions."""
 import copy
 import json
-from strategy import compact_state, get_actions
+from strategy import compact_state, get_actions, entity_map, name_of
 from deck_profiles import strategy_context
 
 
@@ -10,6 +10,53 @@ def predict_choice(router, context, question):
     tok=agent.tok
     maximum=min(1024,int(agent.cfg.get('max_len',1024)))
     head=min(256,int(agent.cfg.get('head_max_len',256)))
+    criteria=question['move']['criteria']
+    if not criteria:raise ValueError('沒有候選選項')
+    # Tournament batches preserve full option text within the SDK's shared head.
+    # Long descriptions live in state; the head contains an explicit reference.
+    def tokens(text):
+        return tok(text.replace(tok.mask_token,' '),add_special_tokens=False)['input_ids']
+    instructions=question['move']['instructions']
+    brief=instructions if len(tokens('choice question: '+instructions))<=64 else '依照 decision_instructions 選擇最佳選項。'
+    def description(key,value):
+        return value if len(tokens(' '+key+': '+value))<=48 else '詳見 candidate_details '+key
+    def batches(items):
+        reserve=max(16,len(tokens('choice question: '+brief)))
+        groups=[];group=[];size=reserve
+        for key,value in items:
+            cost=1+len(tokens(' '+key+': '+description(key,value)))
+            if group and size+cost>head:
+                groups.append(group);group=[];size=reserve
+            if size+cost>head:raise ValueError('單一選項超出模型問題預算')
+            group.append((key,value));size+=cost
+        if group:groups.append(group)
+        return groups
+    pending=list(criteria.items());calls=[]
+    while True:
+        groups=batches(pending)
+        winners=[]
+        if len(groups)==len(pending) and len(pending)>1:
+            raise ValueError('模型問題預算不足以比較兩個選項')
+        for group in groups:
+            if len(group)==1 and len(groups)>1:
+                winners.extend(group);continue
+            payload=copy.deepcopy(context)
+            if brief!=instructions:payload['decision_instructions']=instructions
+            details={k:v for k,v in group if description(k,v)!=v}
+            if details:payload['candidate_details']=details
+            request={'move':dict(type='choice',instructions=brief,
+                                criteria={k:description(k,v) for k,v in group})}
+            answer,budget=_predict_batch(router,agent,payload,request,maximum,head)
+            calls.append(dict(choices=[k for k,_ in group],answer=answer,budget=budget))
+            winners.append((answer['choice'],criteria[answer['choice']]))
+        if len(winners)==1:
+            budget=dict(calls[-1]['budget'],comparison_calls=len(calls),comparisons=calls)
+            return calls[-1]['answer'],budget
+        pending=winners
+
+
+def _predict_batch(router,agent,context,question,maximum,head):
+    tok=agent.tok
     from laya.common import build_sequence
     q=question['move']
     internal=dict(t='choice',ins=q['instructions'],crit=q['criteria'])
@@ -17,6 +64,11 @@ def predict_choice(router, context, question):
     sequence,markers=build_sequence(tok,'',internal,maximum,head)
     if len(markers)!=len(q['criteria']):
         raise ValueError('選項超出模型預算，停止決策')
+    for index,(key,value) in enumerate(q['criteria'].items()):
+        expected=tok((' '+key+': '+value).replace(tok.mask_token,' '),add_special_tokens=False)['input_ids']
+        end=markers[index+1] if index+1<len(markers) else markers[index]+1+len(expected)
+        if sequence[markers[index]+1:end]!=expected:
+            raise ValueError('模型編碼器截斷選項，停止決策')
     room=maximum-len(sequence)
     value=copy.deepcopy(context)
     reductions=[]
@@ -54,19 +106,31 @@ def staged_action(state,cards,profile,choose):
     context=compact_state(state,cards)
     context['deck_strategy']=strategy_context(profile)
     trace=[]
+    entities=entity_map(state)
+    kind_names={'play':'出牌','attack':'攻擊','hero_power':'英雄能力','end_turn':'結束回合'}
     for stage,field in [('動作種類','kind'),('使用卡牌','entity_id'),('指定目標','target_id')]:
         groups={}
         for action in remaining:groups.setdefault(action.get(field),[]).append(action)
         if len(groups)==1:continue
         mapping={f'a{i}':group for i,group in enumerate(groups.values())}
-        criteria={key:group[0]['description']+(f'（另有 {len(group)-1} 個合法選擇）' if len(group)>1 else '')
-                  for key,group in mapping.items()}
-        question={'move':dict(type='choice',instructions=f'選擇{stage}。考慮存活、斬殺、順序與資源；目標示例不是唯一目標。',criteria=criteria)}
+        def describe(group):
+            first=group[0]
+            if field=='kind':
+                return kind_names.get(first['kind'],first['kind'])+f'（{len(group)} 個合法動作）'
+            if field=='entity_id':
+                source=entities.get(first.get('entity_id'))
+                name=name_of(source,cards) if source else first['description']
+                targets=[str(a['target_id']) for a in group if a.get('target_id') is not None]
+                return name+f"；費用 {first.get('cost',0)}"+('；可選目標 '+','.join(targets) if targets else '')
+            return first['description']
+        criteria={key:describe(group) for key,group in mapping.items()}
+        question={'move':dict(type='choice',instructions=f'選擇{stage}。考慮存活、斬殺、順序與資源。',criteria=criteria)}
         answer,budget=choose(context,question)
         if answer['choice'] not in mapping:raise ValueError('模型輸出不在本階段候選中')
         remaining=mapping[answer['choice']]
         context['selected_action']=remaining[0]['kind']
-        context['selected_entity']=remaining[0].get('entity_id')
+        sources={a.get('entity_id') for a in remaining}
+        if len(sources)==1:context['selected_entity']=next(iter(sources))
         trace.append(dict(stage=stage,answer=answer,budget=budget))
     if len(remaining)!=1:
         raise ValueError('動作仍有未解析的替代操作')

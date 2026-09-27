@@ -19,6 +19,53 @@ def fake_agent():
 
 
 class StagedDecisionTests(unittest.TestCase):
+    def test_source_choice_describes_all_targets_without_preselecting_source(self):
+        state,cards=fixture([unit(1,'1'),unit(3,'1')],[unit(2,'2')],
+                            [option(0,1,[2,102]),option(1,3,[2,102])])
+        calls=[]
+        def choose(context,question):
+            calls.append(question)
+            if len(calls)==1:
+                self.assertNotIn('→',str(question))
+            elif len(calls)==2:
+                self.assertNotIn('selected_entity',context)
+                self.assertTrue(all('2,102' in value for value in question['move']['criteria'].values()))
+            else:self.assertEqual(context['selected_entity'],1)
+            return {'choice':next(iter(question['move']['criteria']))},{}
+        staged_action(state,cards,None,choose)
+        self.assertEqual(len(calls),3)
+
+    def test_many_choices_are_compared_in_bounded_batches(self):
+        router=Mock();router.load.return_value=fake_agent()
+        criteria={f'a{i}':str(i)+'x'*320 for i in range(16)}
+        def predict(context,question,**kwargs):
+            choices=question['move']['criteria']
+            return {'answers':{'move':{'choice':max(choices,key=lambda k:int(k[1:]))}}}
+        router.predict.side_effect=predict
+        answer,budget=predict_choice(router,{}, {'move':dict(type='choice',instructions='choose',criteria=criteria)})
+        self.assertEqual(answer['choice'],'a15')
+        self.assertGreater(budget['comparison_calls'],1)
+        visited=set()
+        for call in router.predict.call_args_list:
+            visited.update(call.args[1]['move']['criteria'])
+            self.assertLessEqual(len(call.args[1]['move']['criteria']),5)
+        self.assertEqual(visited,set(criteria))
+
+    def test_long_option_and_instruction_are_preserved_in_context(self):
+        import json
+        router=Mock();router.load.return_value=fake_agent()
+        description='x'*600+'distinct final effect'
+        instruction='y'*600+'choose carefully'
+        def predict(context,question,**kwargs):
+            payload=json.loads(context)
+            self.assertEqual(payload['candidate_details']['a'],description)
+            self.assertEqual(payload['decision_instructions'],instruction)
+            self.assertIn('candidate_details',question['move']['criteria']['a'])
+            return {'answers':{'move':{'choice':'a'}}}
+        router.predict.side_effect=predict
+        answer,_=predict_choice(router,{}, {'move':dict(type='choice',instructions=instruction,criteria={'a':description,'b':'short'})})
+        self.assertEqual(answer['choice'],'a')
+
     def test_over_budget_numeric_state_is_not_silently_truncated(self):
         router=Mock()
         router.load.return_value=fake_agent()
