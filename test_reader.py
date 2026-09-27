@@ -2,6 +2,49 @@ import unittest
 from reader import State
 
 class ReaderTests(unittest.TestCase):
+    def test_public_plays_wait_for_reveal_and_survive_transform(self):
+        state=State()
+        def feed(text):state.feed('GameState.DebugPrintPower() - '+text)
+        feed('CREATE_GAME')
+        feed('FULL_ENTITY - Creating ID=10 CardID=')
+        feed('tag=ZONE value=HAND')
+        play='BLOCK_START BlockType=PLAY Entity=[entityName=UNKNOWN ENTITY [cardType=INVALID] id=10 zone=HAND zonePos=1 cardId= player=2] EffectCardId=0 Target=0'
+        feed(play)
+        self.assertEqual(state.snapshot()['public_plays'],[])
+        feed('SHOW_ENTITY - Updating Entity=10 CardID=DRAGON')
+        self.assertEqual(state.snapshot()['public_plays'],[])
+        feed('TAG_CHANGE Entity=10 tag=ZONE value=PLAY')
+        first=state.snapshot()['public_plays']
+        self.assertEqual(first[0]['card_id'],'DRAGON')
+        feed('CHANGE_ENTITY - Updating Entity=10 CardID=SHEEP')
+        self.assertEqual(state.snapshot()['public_plays'][0]['card_id'],'DRAGON')
+        state.feed('PowerTaskList.DebugPrintPower() - '+play)
+        self.assertEqual(len(state.snapshot()['public_plays']),1)
+        feed('TAG_CHANGE Entity=10 tag=ZONE value=HAND')
+        feed(play)
+        feed('SHOW_ENTITY - Updating Entity=10 CardID=SHEEP')
+        feed('TAG_CHANGE Entity=10 tag=ZONE value=PLAY')
+        self.assertEqual(len(state.snapshot()['public_plays']),2)
+        self.assertEqual(len(first),1)
+        feed('CREATE_GAME')
+        self.assertEqual(state.snapshot()['public_plays'],[])
+
+    def test_secret_identity_is_withheld_until_public(self):
+        state=State()
+        def feed(text):state.feed('GameState.DebugPrintPower() - '+text)
+        feed('FULL_ENTITY - Creating ID=10 CardID=SECRET')
+        feed('tag=ZONE value=HAND')
+        feed('BLOCK_START BlockType=PLAY Entity=[id=10 zone=HAND cardId=SECRET player=2] EffectCardId=0')
+        feed('TAG_CHANGE Entity=10 tag=ZONE value=SECRET')
+        feed('SHOW_ENTITY - Updating Entity=10 CardID=SECRET')
+        self.assertEqual(state.snapshot()['public_plays'],[])
+        feed('TAG_CHANGE Entity=10 tag=ZONE value=GRAVEYARD')
+        self.assertEqual(state.snapshot()['public_plays'][0]['card_id'],'SECRET')
+        feed('BLOCK_START BlockType=PLAY Entity=[id=11 zone=PLAY cardId=POWER player=2] EffectCardId=0')
+        feed('SHOW_ENTITY - Updating Entity=11 CardID=POWER')
+        feed('TAG_CHANGE Entity=11 tag=ZONE value=PLAY')
+        self.assertEqual(len(state.snapshot()['public_plays']),1)
+
     def test_enchantment_snapshot_preserves_attachment_and_zone_changes(self):
         state=State()
         for line in ['FULL_ENTITY - Creating ID=80 CardID=TLC_835e',

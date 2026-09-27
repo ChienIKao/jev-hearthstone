@@ -25,6 +25,8 @@ class State:
         self.sent_choice = None
         self.sent_option = None
         self.sent_collecting = False
+        self.public_plays = []
+        self.pending_plays = {}
         config = Path(__file__).parent / 'config.json'
         self.local_name = json.loads(config.read_text(encoding='utf-8-sig')).get('local_player_name') if config.exists() else None
 
@@ -50,6 +52,13 @@ class State:
             self.player_names[value] = unknown
             return self.resolve(value)
         return None
+
+    def publish_play(self,key):
+        event=self.pending_plays.get(key)
+        entity=self.entities.get(key,{})
+        if event and event.get('card_id') and entity.get('tags',{}).get('ZONE') in ('PLAY','GRAVEYARD'):
+            self.public_plays.append(dict(event))
+            del self.pending_plays[key]
 
     def feed(self, line):
         sent=re.search(r'GameState\.SendOption\(\) - selectedOption=(\d+) selectedSubOption=(-?\d+) selectedTarget=(\d+) selectedPosition=(\d+)',line)
@@ -137,6 +146,8 @@ class State:
         self.revision += 1
         text = line.split(prefix, 1)[1].strip()
         if text == 'CREATE_GAME':
+            self.public_plays = []
+            self.pending_plays = {}
             self.sent_option = None
             self.choices = {}
             self.choice_current = None
@@ -152,6 +163,20 @@ class State:
             self.unresolved = 0
             self.current = None
             self.games += 1
+            return
+        play=re.match(r'BLOCK_START BlockType=PLAY Entity=(.*?) EffectCardId=',text)
+        if play:
+            self.current=None
+            descriptor=play[1]
+            key=self.resolve(descriptor)
+            zone=re.search(r'\bzone=(\w+)',descriptor)
+            owner=re.search(r'\bplayer=(\d+)',descriptor)
+            card=re.search(r'\bcardId=([^\s\]]*)',descriptor)
+            # A location activation or hero power is not a card played from hand.
+            if key is not None and zone and zone[1]=='HAND' and owner:
+                game=next((e['tags'] for e in self.entities.values() if e['tags'].get('CARDTYPE')=='GAME'),{})
+                self.pending_plays[key]=dict(entity_id=key,controller=owner[1],
+                    card_id=card[1] if card else '',turn=game.get('TURN'),revision=self.revision)
             return
         match = re.match(r'(?:GameEntity|Player) EntityID=(\d+)', text)
         if not match:
@@ -172,6 +197,9 @@ class State:
                 name = re.search(r'entityName=(.*?) id=', match[1])
                 if name and not name[1].startswith('UNKNOWN'):
                     entity['name'] = name[1]
+                if self.current in self.pending_plays:
+                    self.pending_plays[self.current]['card_id']=match[2]
+                    self.publish_play(self.current)
             return
         match = re.match(r'TAG_CHANGE Entity=(.*?) tag=(\S+) value=(\S+)', text)
         if match:
@@ -182,6 +210,7 @@ class State:
                 return
             entity = self.entity(key)
             entity['tags'][match[2]] = match[3]
+            if match[2]=='ZONE':self.publish_play(key)
             name = re.search(r'entityName=(.*?) id=', match[1])
             if name and not name[1].startswith('UNKNOWN'):
                 entity['name'] = name[1]
@@ -189,6 +218,7 @@ class State:
         match = re.match(r'tag=(\S+) value=(\S+)', text)
         if match and self.current is not None:
             self.entity(self.current)['tags'][match[1]] = match[2]
+            if match[1]=='ZONE':self.publish_play(self.current)
         elif not match:
             self.current = None
 
@@ -212,7 +242,7 @@ class State:
                 mana = int(tags['RESOURCES']) - int(tags.get('RESOURCES_USED', 0)) + int(tags.get('TEMP_RESOURCES', 0))
             players.append({'controller': controller, 'current_player': tags.get('CURRENT_PLAYER'), 'mana': mana, 'resource_tags': {k: tags[k] for k in mana_keys if k in tags}, 'hand': zone('HAND'), 'board': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') in ('MINION', 'LOCATION')], 'heroes': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'HERO'], 'hero_powers': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'HERO_POWER'], 'weapons': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'WEAPON'], 'secret_count': len(zone('SECRET')), 'deck_count': len(zone('DECK')), 'player_tags': {k: tags[k] for k in ('FIRST_PLAYER','MULLIGAN_STATE','PLAYSTATE','FATIGUE','SPELLPOWER','HEALING_DOES_DAMAGE','TIMEOUT') if k in tags}})
         game = next((e['tags'] for e in self.entities.values() if e['tags'].get('CARDTYPE') == 'GAME'), {})
-        return {'enchantments': [dict(e, tags=dict(e['tags'])) for e in self.entities.values() if e['tags'].get('CARDTYPE') == 'ENCHANTMENT'], 'choices': self.choices, 'sent_choice': self.sent_choice, 'sent_option': self.sent_option, 'game_serial': self.game_serial, 'revision': self.revision, 'games_seen': self.games, 'turn': game.get('TURN'), 'step': game.get('STEP'), 'game_state': game.get('STATE'), 'players': players, 'unresolved_events': self.unresolved, 'local_controller': self.player_names.get(self.local_name), 'options': self.options, 'option_set': self.option_set, 'options_fresh': self.options_fresh and not self.options_collecting, 'status': 'observed_partial_state' if players else 'waiting_for_game'}
+        return {'public_plays': [dict(e) for e in self.public_plays], 'enchantments': [dict(e, tags=dict(e['tags'])) for e in self.entities.values() if e['tags'].get('CARDTYPE') == 'ENCHANTMENT'], 'choices': self.choices, 'sent_choice': self.sent_choice, 'sent_option': self.sent_option, 'game_serial': self.game_serial, 'revision': self.revision, 'games_seen': self.games, 'turn': game.get('TURN'), 'step': game.get('STEP'), 'game_state': game.get('STATE'), 'players': players, 'unresolved_events': self.unresolved, 'local_controller': self.player_names.get(self.local_name), 'options': self.options, 'option_set': self.option_set, 'options_fresh': self.options_fresh and not self.options_collecting, 'status': 'observed_partial_state' if players else 'waiting_for_game'}
 
 def main():
     parser = argparse.ArgumentParser()

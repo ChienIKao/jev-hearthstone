@@ -146,7 +146,13 @@ def compact_state(state, cards):
                                  if 'DURABILITY' in e.get('tags',{}) else None)
         value['tags'] = [k for k in ('TAUNT','DIVINE_SHIELD','POISONOUS','LIFESTEAL','FROZEN','EXHAUSTED','STEALTH','IMMUNE','SILENCED') if number(e, k)]
         return value
-    return {'turn': state.get('turn'), 'mana': own.get('mana'), 'me': {z: [card(e) for e in own.get(z, [])] for z in ZONES}, 'opponent': {z: [card(e) for e in enemy.get(z, [])] for z in ('board','heroes','weapons')}, 'opponent_hand_count': len(enemy.get('hand',[])), 'opponent_secrets': enemy.get('secret_count', 0)}
+    played={}
+    for event in state.get('public_plays',[]):
+        if event.get('controller')!=enemy['controller'] or not event.get('card_id'):continue
+        cid=event['card_id']
+        played[cid]=played.get(cid,0)+1
+    history=[[cards.get(cid,{}).get('name',cid),count] for cid,count in played.items()]
+    return {'opponent_mana': enemy.get('mana'), 'opponent_public_plays': history, 'turn': state.get('turn'), 'mana': own.get('mana'), 'me': {z: [card(e) for e in own.get(z, [])] for z in ZONES}, 'opponent': {z: [card(e) for e in enemy.get(z, [])] for z in ('board','heroes','weapons')}, 'opponent_hand_count': len(enemy.get('hand',[])), 'opponent_secrets': enemy.get('secret_count', 0)}
 
 
 def max_spend(actions, mana, exclude=None):

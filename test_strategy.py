@@ -22,6 +22,18 @@ def option(idx,source,targets):
 
 
 class StrategyTests(unittest.TestCase):
+    def test_opponent_public_history_and_mana(self):
+        state,cards=fixture([],[],[])
+        state['players'][1]['mana']=2
+        state['players'][1]['hand']=[dict(id=55,card_id='HIDDEN',tags={})]
+        state['public_plays']=[dict(controller='2',card_id='A'),dict(controller='2',card_id='A'),dict(controller='1',card_id='MINE')]
+        cards['A']={'name':'Public dragon'}
+        context=compact_state(state,cards)
+        self.assertEqual(context['opponent_mana'],2)
+        self.assertEqual(context['opponent_public_plays'],[['Public dragon',2]])
+        self.assertNotIn('HIDDEN',str(context))
+        self.assertNotIn('MINE',str(context))
+
     def test_context_includes_dragon_race_and_remaining_weapon_durability(self):
         state,cards=fixture([],[],[])
         dragon=unit(50,'1',COST=5)
