@@ -123,7 +123,8 @@ class Decider:
             raise ValueError('目前動作尚未支援，需要手動操作')
         result={'evaluation':evaluation,'model_answer':None,'device':self.device}
         from turn_search import combat_plans
-        plans=combat_plans(state,self.cards)
+        from card_simulator import card_plans
+        plans=combat_plans(state,self.cards,limit=3)+card_plans(state,self.cards)
         result['search_plans']=plans
         if evaluation['lethal']:
             chosen=evaluation['lethal']['action']
@@ -140,7 +141,7 @@ class Decider:
                 context=compact_state(state,self.cards)
                 context['deck_strategy']=strategy_context(self.profile)
                 answer,budget=predict_choice(self.router,context,{'move':dict(type='choice',
-                    instructions='比較確定的攻擊序列結果；這些不是完整回合。也可選其他動作。',criteria=plan_options)})
+                    instructions='比較已建模的動作結果；這些不是完整回合。也可選其他動作。',criteria=plan_options)})
                 result['plan_selection']=dict(answer=answer,budget=budget)
                 if answer['choice']!='other':selected_plan=plans[int(answer['choice'][1:])]
             if selected_plan:
