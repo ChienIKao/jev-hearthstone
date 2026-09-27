@@ -1,0 +1,110 @@
+from pathlib import Path
+import tempfile
+import threading
+import unittest
+import json
+from unittest.mock import Mock,patch
+
+from laya_hearthstone.ranked_session import RankedSession,deadline_action
+from laya_hearthstone.menu_navigation import RankedNavigator,menu_step
+
+
+def state(game,status):
+    return dict(game_serial=game,game_state=status,local_controller='1',players=[
+        dict(controller='1',player_tags={'PLAYSTATE':'WON'}),dict(controller='2')])
+
+
+class RankedSessionTests(unittest.TestCase):
+    def test_action_log_preserves_search_and_model_trace(self):
+        from tests.test_strategy import fixture
+        current,_=fixture([],[],[])
+        current.update(game_serial='one',revision=12)
+        decision=dict(action=dict(key='o99'),method='laya_search',seconds=.2,
+                      search_plans=[dict(complete_turn=True,summary='test outcome')],
+                      plan_selection=dict(answer={'choice':'p0'},budget={'context_tokens':100}))
+        with tempfile.TemporaryDirectory() as folder:
+            hands=Mock(evidence=Path(folder)/'evidence')
+            hands.cards={}
+            hands.observe.side_effect=[state('old','COMPLETE'),current,state('one','COMPLETE')]
+            hands.run.return_value=dict(confirmed=True,timings={'total':3})
+            decider=Mock();decider.decide.return_value=decision
+            with patch('laya_hearthstone.ranked_session.RankedNavigator') as factory:
+                factory.return_value.enter_game.return_value=current
+                RankedSession(hands,decider,dict(name='龍戰',mode='standard'),threading.Event(),Mock(),1).run()
+            record=json.loads((Path(folder)/'ranked-decisions.jsonl').read_text(encoding='utf-8'))
+            self.assertEqual(record['revision'],12)
+            self.assertEqual(record['decision'],decision)
+            self.assertTrue(record['confirmed'])
+
+    def test_mode_selection_touches_emblem_above_caption(self):
+        labels=[dict(text='標準',point=[.497,.537]),
+                dict(text='開放',point=[.324,.603]),
+                dict(text='休閒模式',point=[.67,.6])]
+        for mode,x,y in [('standard',.497,.337),('wild',.324,.403)]:
+            step=menu_step(labels,dict(mode=mode))
+            self.assertEqual(step['kind'],'click')
+            self.assertAlmostEqual(step['point'][0],x)
+            self.assertAlmostEqual(step['point'][1],y)
+
+    def test_log_cap_prevents_model_loading_and_queue(self):
+        hands=Mock()
+        hands.observe.return_value=state('old','COMPLETE')
+        hands.reader.check_logging_health.side_effect=ValueError('log cap reached')
+        decider=Mock()
+        with patch('laya_hearthstone.ranked_session.RankedNavigator') as navigator:
+            with self.assertRaisesRegex(ValueError,'log cap'):
+                RankedSession(hands,decider,dict(name='龍戰'),threading.Event(),Mock(),1).run()
+            navigator.assert_not_called()
+            decider.load.assert_not_called()
+    def test_result_animation_waits_until_result_overlay(self):
+        stop=Mock();stop.is_set.return_value=False
+        hands=Mock()
+        hands.observe.side_effect=[state('old','COMPLETE'),state('new','RUNNING')]
+        labels=[dict(text='敵方回合',point=[.8,.45])]
+        with patch('laya_hearthstone.menu_navigation.MenuVision') as vision, patch('laya_hearthstone.menu_navigation.time.monotonic',side_effect=[0,1,100]):
+            vision.return_value.read.return_value=labels
+            navigator=RankedNavigator(Mock(),Mock(),stop)
+            self.assertEqual(navigator.enter_game(hands,dict(name='龍戰',mode='standard'),'old')['game_serial'],'new')
+            navigator.device.execute.assert_not_called()
+        prompt=[dict(text='輕點以繼續',point=[.5,.94])]
+        self.assertEqual(menu_step(prompt,{},completed=True)['kind'],'click')
+        self.assertEqual(menu_step(prompt,{},completed=False)['kind'],'wait')
+
+    def test_deadline_uses_game_timeout_and_does_not_interrupt_choices(self):
+        current=state('one','RUNNING')
+        current['players'][0]['player_tags']['TIMEOUT']='75'
+        end=dict(key='o0',kind='end_turn')
+        self.assertIsNone(deadline_action(current,{'o0':end},60))
+        self.assertEqual(deadline_action(current,{'o0':end},68),end)
+        current['players'][0]['player_tags']['MULLIGAN_STATE']='INPUT'
+        self.assertIsNone(deadline_action(current,{'o0':end},80))
+
+    def test_two_games_requeue_with_same_profile_and_stop_at_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            hands=Mock(evidence=Path(folder)/'evidence')
+            hands.observe.side_effect=[state('old','COMPLETE'),state('one','COMPLETE'),state('two','COMPLETE')]
+            decider=Mock()
+            profile=dict(name='龍戰',mode='standard',combos='保留 A')
+            with patch('laya_hearthstone.ranked_session.RankedNavigator') as factory:
+                navigator=factory.return_value
+                navigator.enter_game.side_effect=[state('one','RUNNING'),state('two','RUNNING')]
+                session=RankedSession(hands,decider,profile,threading.Event(),Mock(),2)
+                profile['name']='changed'
+                session.run()
+                self.assertEqual(session.completed,2)
+                self.assertEqual(navigator.enter_game.call_count,2)
+                self.assertEqual(navigator.enter_game.call_args.args[2],'one')
+                self.assertEqual(decider.profile['name'],'龍戰')
+                self.assertEqual(len((Path(folder)/'ranked-results.jsonl').read_text(encoding='utf-8').splitlines()),2)
+
+    def test_stop_during_model_loading_never_queues(self):
+        stop=threading.Event()
+        decider=Mock();decider.load.side_effect=stop.set
+        with patch('laya_hearthstone.ranked_session.RankedNavigator') as navigator:
+            session=RankedSession(Mock(),decider,dict(name='龍戰'),stop,Mock())
+            session.run()
+            navigator.assert_not_called()
+
+
+if __name__=='__main__':
+    unittest.main()

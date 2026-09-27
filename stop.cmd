@@ -1,2 +1,2 @@
 @echo off
-powershell.exe -NoProfile -File "%~dp0stop.ps1"
+powershell.exe -NoProfile -File "%~dp0scripts\stop.ps1"

@@ -10,4 +10,4 @@ if not exist "data\cards.zhTW.json" (
   pause
   exit /b 1
 )
-start "Laya Hearthstone" ".venv\Scripts\pythonw.exe" "android_app.py"
+start "Laya Hearthstone" ".venv\Scripts\pythonw.exe" "%~dp0scripts\run.py" android_app
