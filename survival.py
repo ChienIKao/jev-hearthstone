@@ -17,7 +17,7 @@ def visible_attack_threat(state,cards,time_budget=.008):
         return result(None,'未建模的秘密、武器或附魔')
     if any(not combat_inert(e,cards) for p in (own,enemy) for e in p['board']):
         return result(None,'未建模的場上觸發')
-    forbidden=('DORMANT','IMMUNE','CANT_BE_DAMAGED','CANT_BE_ATTACKED','STEALTH','DEATHRATTLE','REBORN','LIFESTEAL','CANT_ATTACK','CANT_ATTACK_HEROES')
+    forbidden=('DORMANT','IMMUNE','CANT_BE_DAMAGED','CANT_BE_ATTACKED','STEALTH','DEATHRATTLE','REBORN','CANT_ATTACK','CANT_ATTACK_HEROES')
     if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes'] for t in forbidden):
         return result(None,'未建模的攻擊限制或觸發')
     prepared=copy.deepcopy(state)

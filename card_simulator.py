@@ -143,9 +143,12 @@ def simulate_attack(state,action):
         return Transition(None,'只模擬我方手下攻擊敵方角色')
     if number(source,'DORMANT') or number(target,'DORMANT'):return Transition(None,'休眠手下不參與戰鬥')
     blocked=('IMMUNE','CANT_BE_DAMAGED','CANT_BE_ATTACKED','STEALTH',
-             'DEATHRATTLE','REBORN','LIFESTEAL','CANT_ATTACK','CANT_ATTACK_HEROES')
+             'DEATHRATTLE','REBORN','CANT_ATTACK','CANT_ATTACK_HEROES')
     if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes'] for t in blocked):
         return Transition(None,'尚未建模的攻擊限制或觸發')
+    if any(number(e,'LIFESTEAL') for e in (source,target)) and any(
+            int(p.get('player_tags',{}).get('HEALING_DOES_DAMAGE',0)) for p in (own,enemy)):
+        return Transition(None,'尚未建模的治療轉傷害效果')
     if source['tags'].get('EXHAUSTED')!='0' or number(source,'FROZEN') or number(source,'ATK')<=0:
         return Transition(None,'攻擊者未確認可攻擊')
     taunts=[e for e in enemy['board'] if number(e,'TAUNT') and not number(e,'DORMANT')]
@@ -156,13 +159,19 @@ def simulate_attack(state,action):
     after=copy.deepcopy(state);me,foe=sides(after)
     src=entity_map(after)[source['id']];dst=entity_map(after)[target['id']]
     def damage(entity,amount,poison=False):
-        if amount<=0:return
-        if number(entity,'DIVINE_SHIELD'):entity['tags']['DIVINE_SHIELD']='0';return
+        if amount<=0:return 0
+        if number(entity,'DIVINE_SHIELD'):entity['tags']['DIVINE_SHIELD']='0';return 0
         armor=min(amount,number(entity,'ARMOR'))
         entity['tags']['ARMOR']=str(number(entity,'ARMOR')-armor)
         entity['tags']['DAMAGE']=str(number(entity,'HEALTH') if poison and amount>armor else number(entity,'DAMAGE')+amount-armor)
-    damage(dst,number(src,'ATK'),bool(number(src,'POISONOUS')) and not hero_target)
-    if not hero_target:damage(src,number(dst,'ATK'),bool(number(dst,'POISONOUS')))
+        # Overkill and armor count as damage; poison destruction adds no healing.
+        return amount
+    dealt=damage(dst,number(src,'ATK'),bool(number(src,'POISONOUS')) and not hero_target)
+    returned=damage(src,number(dst,'ATK'),bool(number(dst,'POISONOUS'))) if not hero_target else 0
+    for player,minion,amount in ((me,src,dealt),(foe,dst,returned)):
+        if number(minion,'LIFESTEAL') and amount:
+            hero=player['heroes'][0]
+            hero['tags']['DAMAGE']=str(max(0,number(hero,'DAMAGE')-amount))
     attacks=number(src,'NUM_ATTACKS_THIS_TURN')+1
     src['tags']['NUM_ATTACKS_THIS_TURN']=str(attacks)
     src['tags']['EXHAUSTED']='1' if attacks>=(2 if number(src,'WINDFURY') else 1) else '0'
@@ -218,11 +227,11 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
         def active(player):return [e for e in player['board'] if e['tags'].get('CARDTYPE')=='MINION' and not number(e,'DORMANT')]
         friendly=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in active(own)) or '空'
         hostile=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in active(enemy)) or '空'
-        score=sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(own))-sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(enemy))-health*.8+number(own['heroes'][0],'ARMOR')*.2
+        score=sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(own))-sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(enemy))-health*.8+(hp(own['heroes'][0])+number(own['heroes'][0],'ARMOR'))*.2
         if hp(own['heroes'][0])<=0:score=-100000
         elif health<=0:score=100000
         return dict(action=action,sequence=sequence,score=score,
-            summary=f"{len(sequence)}步：敵英雄 {health}；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}",
+            summary=f"{len(sequence)}步：敵英雄 {health}；我英雄 {hp(own['heroes'][0])}+{number(own['heroes'][0],'ARMOR')}甲；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}",
             lethal=health<=0 and hp(own['heroes'][0])>0,scope='known_card_prefix',complete_turn=False)
     def completed(snapshot,first,sequence,prefix):
         if prefix['lethal']:

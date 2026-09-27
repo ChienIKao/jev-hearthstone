@@ -19,8 +19,10 @@ def finish_turn(state,cards,max_outcomes=128):
     if any(not combat_inert(e,cards) for p in (own,enemy) for e in p['board']):
         return TurnEnd([],'未建模的回合結束效果')
     if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes']
-           for t in ('DORMANT','FROZEN','DEATHRATTLE','REBORN','LIFESTEAL','IMMUNE','CANT_BE_DAMAGED')):
+           for t in ('DORMANT','FROZEN','DEATHRATTLE','REBORN','IMMUNE','CANT_BE_DAMAGED')):
         return TurnEnd([],'未建模的回合結束狀態或死亡效果')
+    if any(e.get('card_id')=='CAP_107t' and number(e,'LIFESTEAL') and not number(e,'SILENCED') for e in own['board']):
+        return TurnEnd([],'尚未建模的生命竊取砲擊')
     shots=sum(e.get('card_id')=='CAP_107t' and not number(e,'SILENCED') for e in own['board'])
     targets=[e for e in enemy['board'] if e['tags'].get('CARDTYPE')=='MINION']+enemy['heroes']
     if max(1,len(targets))**shots>max_outcomes:

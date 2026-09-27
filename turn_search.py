@@ -8,7 +8,10 @@ from enchantments import enchantment_boundary
 # These effects do not trigger during the supported action prefixes. End-turn
 # effects are deliberately outside a prefix forecast, including random cannons.
 # Exact text checks make a card-data update fall back to unknown effects.
+# Each simulator separately validates supported keywords such as Lifesteal.
 COMBAT_INERT={
+    'TIME_056':'生命竊取聖盾術',
+    'EDR_449':'生命竊取戰吼：注能你的英雄能力',
     'CORE_NEW1_023':'飄渺',
     'END_033':'飄渺若你手中有其他龍類，消耗減少(3)',
     'CATA_556':'戰吼：獲得一個消耗為(3)以下的隨機龍類',
