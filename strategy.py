@@ -338,7 +338,33 @@ def rank_actions(state, cards):
                         reasons.append('補回已損失生命')
                     else:
                         score -= restored*3 + 5
-                if target and target['tags'].get('CONTROLLER') != own['controller'] and re.search('賦予|使一個.*獲得',text):
+                location_forecast=None
+                location_value_known=False
+                if a['kind']=='location' and source.get('card_id')=='CORE_REV_990':
+                    from card_simulator import simulate_card
+                    from turn_search import COMBAT_INERT
+                    location_forecast=simulate_card(state,a,cards).state
+                    if location_forecast is not None:
+                        after=entity_map(location_forecast).get(target['id'])
+                        after_value=number(after,'ATK')*1.3+hp(after)*.5 if after else 0
+                        location_value_known=True
+                    elif (''.join(text.split())==COMBAT_INERT['CORE_REV_990'] and target
+                          and not any(number(target,k) for k in ('IMMUNE','CANT_BE_DAMAGED','DORMANT','MIN_HEALTH'))):
+                        # Local damage/value estimate remains useful when an
+                        # unrelated unknown enchantment blocks a whole rollout.
+                        remaining=hp(target)-(0 if number(target,'DIVINE_SHIELD') else 1)
+                        after=remaining>0
+                        after_value=(number(target,'ATK')+2)*1.3+remaining*.5 if after else 0
+                        location_value_known=True
+                    if location_value_known:
+                        before_value=number(target,'ATK')*1.3+hp(target)*.5
+                        friendly=target['tags'].get('CONTROLLER')==own['controller']
+                        score+=(after_value-before_value)*(1 if friendly else -1)-.5
+                        if not after and friendly:
+                            score-=6
+                            reasons.append('此地標會對我方手下造成致命傷害；後續觸發另計')
+                        else:reasons.append('已計算地標傷害與攻擊力變化')
+                if not location_value_known and target and target['tags'].get('CONTROLLER') != own['controller'] and re.search('賦予|使一個.*獲得',text):
                     score -= 8
                     reasons.append('增益敵方通常不利')
                 if re.search('抽|發現',text):

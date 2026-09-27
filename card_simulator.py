@@ -46,11 +46,24 @@ def simulate_card(state,action,cards):
                 adapter='minion'
         elif source['card_id']=='GAME_005' and text=='本回合獲得1顆法力水晶':
             adapter='coin'
+        elif source['card_id']=='CORE_REV_990' and text==COMBAT_INERT['CORE_REV_990'] and len(own['board'])<7:
+            adapter='location_body'
+    elif action['kind']=='location' and source.get('card_id')=='CORE_REV_990' and text==COMBAT_INERT['CORE_REV_990']:
+        if source not in own['board'] or number(source,'EXHAUSTED') or number(source,'LOCATION_ACTION_COOLDOWN') or hp(source)<=0:
+            return Transition(None,'地標不可使用')
+        target=entities.get(action.get('target_id'))
+        if target is None or target not in own['board']+enemy['board'] or target['tags'].get('CARDTYPE')!='MINION':
+            return Transition(None,'地標目標已失效')
+        if any(number(target,t) for t in ('IMMUNE','CANT_BE_DAMAGED','DORMANT','DEATHRATTLE','REBORN')):
+            return Transition(None,'地標目標有未建模效果')
+        if number(target,'STEALTH') and target['tags'].get('CONTROLLER')!=own['controller']:
+            return Transition(None,'敵方目標潛行')
+        adapter='damage1_attack2'
     elif action['kind']=='hero_power' and text in ('獲得2點護甲值','英雄能力獲得$d2點護甲值') and not action.get('target_id'):
         adapter='armor2'
     if adapter is None:
         return Transition(None,'未建模、隨機或需要選牌的卡牌效果')
-    cost=card_cost(source,cards)
+    cost=0 if adapter=='damage1_attack2' else card_cost(source,cards)
     if cost is None or own.get('mana') is None or cost>own['mana']:
         return Transition(None,'費用未知或法力不足')
     if adapter=='damage5_armor5':
@@ -63,7 +76,15 @@ def simulate_card(state,action,cards):
     me,foe=sides(after)
     src=entity_map(after)[source['id']]
     me['mana']-=cost
-    if adapter=='armor2':
+    if adapter=='damage1_attack2':
+        target=entity_map(after)[action['target_id']]
+        if number(target,'DIVINE_SHIELD'):target['tags']['DIVINE_SHIELD']='0'
+        else:target['tags']['DAMAGE']=str(number(target,'DAMAGE')+1)
+        target['tags']['ATK']=str(number(target,'ATK')+2)
+        src['tags'].update(EXHAUSTED='1',LOCATION_ACTION_COOLDOWN='1',DAMAGE=str(number(src,'DAMAGE')+1))
+        for player in (me,foe):
+            player['board']=[e for e in player['board'] if not ((e['tags'].get('CARDTYPE')=='MINION' or e['id']==src['id']) and hp(e)<=0)]
+    elif adapter=='armor2':
         src['tags']['EXHAUSTED']='1'
         hero=me['heroes'][0]
         hero['tags']['ARMOR']=str(number(hero,'ARMOR')+2)
@@ -73,6 +94,7 @@ def simulate_card(state,action,cards):
     else:
         me['hand']=[e for e in me['hand'] if e['id']!=src['id']]
         src['tags'].update(ZONE='PLAY',EXHAUSTED='1',NUM_TURNS_IN_PLAY='0',NUM_ATTACKS_THIS_TURN='0')
+        if adapter=='location_body':src['tags'].update(EXHAUSTED='0',LOCATION_ACTION_COOLDOWN='0',ATK='0')
         for tag,key in [('ATK','attack'),('HEALTH','health')]:
             if tag not in src['tags'] and key in definition:src['tags'][tag]=str(definition[key])
         if not all(tag in src['tags'] for tag in ('ATK','HEALTH')):
@@ -164,6 +186,11 @@ def rollout_actions(state,cards):
                 if target is not None:action['target_id']=target
                 yield action
     for source in own['board']:
+        if source.get('card_id')=='CORE_REV_990' and not number(source,'EXHAUSTED') and not number(source,'LOCATION_ACTION_COOLDOWN'):
+            for target in own['board']+enemy['board']:
+                if target['tags'].get('CARDTYPE')=='MINION':
+                    yield dict(key=f"sim:location:{source['id']}:{target['id']}",kind='location',entity_id=source['id'],
+                               target_id=target['id'],cost=0,description=f"{name_of(source,cards)} → {name_of(target,cards)}")
         if source['tags'].get('EXHAUSTED')!='0':continue
         for target in enemy['board']+enemy['heroes']:
             yield dict(key=f"sim:attack:{source['id']}:{target['id']}",kind='attack',
@@ -180,7 +207,7 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
     for action in actions.values():
         if action['kind']=='end_turn':
             frontier.append((state,action,[]));continue
-        if action['kind'] not in ('play','hero_power','attack'):continue
+        if action['kind'] not in ('play','hero_power','attack','location'):continue
         transition=simulate_card(state,action,cards)
         if transition.state is None:continue
         frontier.append((transition.state,action,[action['description']]))

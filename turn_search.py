@@ -20,6 +20,7 @@ COMBAT_INERT={
     'CORE_ONY_018':'二選一：為你的英雄恢復#8點生命值，或造成4點傷害',
     'TIME_063':'休眠5回合衝刺。在你打出最新資料片的牌後，提早1回合甦醒',
     'CATA_584':'造成3點傷害，隨機分給敵人。若你本回合打過火焰法術，額外造成3點',
+    'CORE_REV_990':'對一個手下造成1點傷害並賦予它+2攻擊力',
 }
 
 # These weapons have no effect during a minion attack or the supported card plays.
