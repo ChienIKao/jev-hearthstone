@@ -122,6 +122,9 @@ class Decider:
         if not ranked:
             raise ValueError('目前動作尚未支援，需要手動操作')
         result={'evaluation':evaluation,'model_answer':None,'device':self.device}
+        from turn_search import combat_plans
+        plans=combat_plans(state,self.cards)
+        result['search_plans']=plans
         if evaluation['lethal']:
             chosen=evaluation['lethal']['action']
             method='rules_lethal'
@@ -130,11 +133,24 @@ class Decider:
             method='rules_single'
         else:
             self.load()
-            chosen,trace=staged_action(state,self.cards,self.profile,
-                                      lambda context,question:predict_choice(self.router,context,question))
+            selected_plan=None
+            if plans:
+                plan_options={f'p{i}':p['summary'] for i,p in enumerate(plans)}
+                plan_options['other']='改選出牌、技能或其他合法動作'
+                context=compact_state(state,self.cards)
+                context['deck_strategy']=strategy_context(self.profile)
+                answer,budget=predict_choice(self.router,context,{'move':dict(type='choice',
+                    instructions='比較確定的攻擊序列結果；這些不是完整回合。也可選其他動作。',criteria=plan_options)})
+                result['plan_selection']=dict(answer=answer,budget=budget)
+                if answer['choice']!='other':selected_plan=plans[int(answer['choice'][1:])]
+            if selected_plan:
+                chosen,trace=selected_plan['action'],[]
+            else:
+                chosen,trace=staged_action(state,self.cards,self.profile,
+                                          lambda context,question:predict_choice(self.router,context,question))
             result['stages']=trace
             result['device']=self.device
-            method='laya_staged'
+            method='laya_search' if selected_plan else 'laya_staged'
         if chosen['kind']=='end_turn' and evaluation['unsupported_options']:
             raise ValueError('還有未支援的合法操作，請手動處理後再結束回合')
         result.update(action=chosen,method=method,seconds=round(time.monotonic()-start,3))
