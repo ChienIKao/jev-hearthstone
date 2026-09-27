@@ -7,6 +7,7 @@ from turn_search import combat_inert, COMBAT_INERT, passive_weapons_known
 from enchantments import enchantment_boundary
 
 PLAIN_BODIES={'CORE_NEW1_023':'飄渺',
+              'TIME_056':'生命竊取聖盾術',
               'END_033':'飄渺若你手中有其他龍類，消耗減少(3)'}
 
 
@@ -43,7 +44,14 @@ def simulate_card(state,action,cards):
             if len(own['board'])>=7:return Transition(None,'場面已滿')
             if source['card_id']=='TLC_600' and text==COMBAT_INERT['TLC_600']:
                 adapter='damage5_armor5'
+            elif source['card_id']=='EDR_492' and text==COMBAT_INERT['EDR_492'] and not action.get('target_id'):
+                token=cards.get('EDR_492t',{})
+                if ''.join(text_of({'card_id':'EDR_492t'},cards).split())!='衝刺' or token.get('attack')!=1 or token.get('health')!=1:
+                    return Transition(None,'小鴨子卡牌資料未知或已改動')
+                adapter='ducklings'
             elif (vanilla(source,cards) or PLAIN_BODIES.get(source['card_id'])==text) and not action.get('target_id'):
+                if source['card_id']=='TIME_056' and not all(number(source,t) for t in ('LIFESTEAL','DIVINE_SHIELD')):
+                    return Transition(None,'青銅幼龍關鍵字狀態尚未確認')
                 adapter='minion'
         elif source['card_id']=='GAME_005' and text=='本回合獲得1顆法力水晶':
             adapter='coin'
@@ -95,12 +103,21 @@ def simulate_card(state,action,cards):
     else:
         me['hand']=[e for e in me['hand'] if e['id']!=src['id']]
         src['tags'].update(ZONE='PLAY',EXHAUSTED='1',NUM_TURNS_IN_PLAY='0',NUM_ATTACKS_THIS_TURN='0')
+        if number(src,'RUSH') or number(src,'CHARGE'):src['tags']['EXHAUSTED']='0'
         if adapter=='location_body':src['tags'].update(EXHAUSTED='0',LOCATION_ACTION_COOLDOWN='0',ATK='0')
         for tag,key in [('ATK','attack'),('HEALTH','health')]:
             if tag not in src['tags'] and key in definition:src['tags'][tag]=str(definition[key])
         if not all(tag in src['tags'] for tag in ('ATK','HEALTH')):
             return Transition(None,'手下數值未知')
         me['board'].append(src)
+        if adapter=='ducklings':
+            next_id=min([0]+list(entity_map(after)))-1
+            for _ in range(min(3,7-len(me['board']))):
+                me['board'].append(dict(id=next_id,card_id='EDR_492t',tags=dict(
+                    CONTROLLER=me['controller'],CARDTYPE='MINION',ZONE='PLAY',
+                    ATK='1',HEALTH='1',DAMAGE='0',RUSH='1',EXHAUSTED='0',
+                    NUM_TURNS_IN_PLAY='0',NUM_ATTACKS_THIS_TURN='0')))
+                next_id-=1
         if adapter=='damage5_armor5':
             target=entity_map(after)[action['target_id']]
             if number(target,'DIVINE_SHIELD'):
