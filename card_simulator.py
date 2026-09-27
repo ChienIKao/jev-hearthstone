@@ -1,7 +1,8 @@
 """Explicit deterministic card adapters. Unmodelled effects stop a rollout."""
 import copy
+import time
 from dataclasses import dataclass
-from strategy import sides, entity_map, card_cost, number, hp, text_of, vanilla, get_actions
+from strategy import sides, entity_map, card_cost, number, hp, text_of, vanilla, get_actions, name_of
 from turn_search import combat_inert, COMBAT_INERT
 
 PLAIN_BODIES={'CORE_NEW1_023':'飄渺',
@@ -87,25 +88,76 @@ def simulate_card(state,action,cards):
     for player in (me,foe):
         for zone in ('hand','board'):
             for index,e in enumerate(player[zone],1):e['tags']['ZONE_POSITION']=str(index)
+    def holds_dragon(hand,exclude):
+        def races(e):
+            card=cards.get(e.get('card_id'),{})
+            return card.get('races') or [card.get('race')]
+        return any(e['id']!=exclude and set(races(e)) & {'DRAGON','ALL'} for e in hand)
+    for entity in me['hand']:
+        if entity.get('card_id')!='END_033':continue
+        base=cards.get('END_033',{}).get('cost')
+        if not isinstance(base,int):return Transition(None,'龍族減費基礎費用未知')
+        previous=max(0,base-3) if holds_dragon(own['hand'],entity['id']) else base
+        if card_cost(entity,cards)!=previous:
+            return Transition(None,'龍族手牌另有未建模費用修正')
+        entity['tags']['COST']=str(max(0,base-3) if holds_dragon(me['hand'],entity['id']) else base)
     # No invented legal-option packet: a search layer must regenerate its own moves.
     after['options']=[]
     after['options_fresh']=False
     return Transition(after)
 
 
-def card_plans(state,cards,limit=2):
+def rollout_actions(state,cards):
+    """Internal proposals only; simulate_card validates each supported transition."""
+    own,enemy=sides(state)
+    for zone,kind in [('hand','play'),('hero_powers','hero_power')]:
+        for entity in own.get(zone,[]):
+            targets=[None]
+            if entity.get('card_id')=='TLC_600':
+                targets=[e['id'] for p in (own,enemy) for e in p['board']+p['heroes']]
+            for target in targets:
+                action=dict(key=f"sim:{entity['id']}:{target}",kind=kind,entity_id=entity['id'],
+                            description=name_of(entity,cards),cost=card_cost(entity,cards))
+                if target is not None:action['target_id']=target
+                yield action
+
+
+def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
     actions,_=get_actions(state,cards)
-    results=[]
+    results=[];frontier=[]
+    deadline=time.monotonic()+time_budget
     for action in actions.values():
         if action['kind'] not in ('play','hero_power'):continue
         transition=simulate_card(state,action,cards)
         if transition.state is None:continue
-        own,enemy=sides(transition.state)
+        frontier.append((transition.state,action,[action['description']]))
+    def evaluate(snapshot,action,sequence):
+        own,enemy=sides(snapshot)
         health=hp(enemy['heroes'][0])+number(enemy['heroes'][0],'ARMOR')
         friendly=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in own['board']) or '空'
         hostile=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in enemy['board']) or '空'
         score=sum(number(e,'ATK')*1.3+hp(e)*.5 for e in own['board'])-sum(number(e,'ATK')*1.3+hp(e)*.5 for e in enemy['board'])-health*.8+number(own['heroes'][0],'ARMOR')*.2
-        results.append(dict(action=action,sequence=[action['key']],score=score,
-            summary=f"{action['description']}：敵英雄 {health}；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}",
-            lethal=health<=0,scope='single_card_effect',complete_turn=False))
-    return sorted(results,key=lambda p:p['score'],reverse=True)[:limit]
+        if hp(own['heroes'][0])<=0:score=-100000
+        elif health<=0:score=100000
+        return dict(action=action,sequence=sequence,score=score,
+            summary=f"{len(sequence)}步：敵英雄 {health}；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}",
+            lethal=health<=0 and hp(own['heroes'][0])>0,scope='known_card_prefix',complete_turn=False)
+    for depth in range(max_depth):
+        frontier=sorted(frontier,key=lambda n:evaluate(*n)['score'],reverse=True)[:beam_width]
+        children=[]
+        for snapshot,first,sequence in frontier:
+            outcome=evaluate(snapshot,first,sequence);results.append(outcome)
+            if outcome['lethal'] or outcome['score']==-100000 or depth+1==max_depth:continue
+            for action in rollout_actions(snapshot,cards):
+                if time.monotonic()>=deadline:break
+                transition=simulate_card(snapshot,action,cards)
+                if transition.state is not None:
+                    children.append((transition.state,first,sequence+[action['description']]))
+        if not children:break
+        frontier=children
+    seen=set();selected=[]
+    for plan in sorted(results,key=lambda p:p['score'],reverse=True):
+        if plan['action']['key'] in seen:continue
+        seen.add(plan['action']['key']);selected.append(plan)
+        if len(selected)>=limit:break
+    return selected

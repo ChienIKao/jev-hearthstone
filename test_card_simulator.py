@@ -1,11 +1,35 @@
 import copy
 import unittest
 from test_strategy import fixture,unit
-from card_simulator import simulate_card
+from card_simulator import simulate_card,card_plans,PLAIN_BODIES
+from test_strategy import option
 from turn_search import COMBAT_INERT
 
 
 class CardSimulationTests(unittest.TestCase):
+    def test_search_chains_cards_without_reusing_them(self):
+        state,cards=fixture([],[],[option(0,5,[]),option(1,6,[])])
+        for ident in (5,6):
+            card=unit(ident,'1',2,2,COST=2)
+            card['tags']['ZONE']='HAND'
+            state['players'][0]['hand'].append(card)
+            cards[str(ident)]={'text':''}
+        plans=card_plans(state,cards,time_budget=1)
+        self.assertEqual(len(plans[0]['sequence']),2)
+        self.assertIn('剩餘法力 1',plans[0]['summary'])
+        self.assertIn(plans[0]['action']['key'],('o0','o1'))
+        self.assertFalse(plans[0]['action']['key'].startswith('sim:'))
+
+    def test_playing_last_other_dragon_increases_hand_cost(self):
+        state,cards=fixture([],[],[])
+        for ident,cid,cost in [(5,'CORE_NEW1_023',2),(6,'END_033',4)]:
+            card=unit(ident,'1',3,3,COST=cost)
+            card['card_id']=cid;card['tags']['ZONE']='HAND'
+            state['players'][0]['hand'].append(card)
+            cards[cid]={'text':PLAIN_BODIES[cid],'races':['DRAGON'],'cost':7 if cid=='END_033' else 2}
+        result=simulate_card(state,dict(kind='play',entity_id=5),cards)
+        self.assertEqual(result.state['players'][0]['hand'][0]['tags']['COST'],'7')
+
     def test_actual_localized_armor_power_text(self):
         state,cards=fixture([],[],[])
         power=unit(9,'1',COST=2)
