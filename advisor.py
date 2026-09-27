@@ -147,7 +147,7 @@ class Decider:
                 context['deck_strategy']=strategy_context(self.profile)
                 try:
                     answer,budget=predict_choice(self.router,context,{'move':dict(type='choice',
-                        instructions='比較已建模的動作結果；這些不是完整回合。也可選其他動作。',criteria=plan_options)})
+                        instructions='比較方案結果；標示回合結束者已結算，其餘只是局部推演。隨機結果不代表必然斬殺。也可選其他動作。',criteria=plan_options)})
                     result['plan_selection']=dict(answer=answer,budget=budget)
                     if answer['choice']!='other':selected_plan=plans[int(answer['choice'][1:])]
                 except ContextBudgetError:

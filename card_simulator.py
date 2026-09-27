@@ -172,10 +172,13 @@ def rollout_actions(state,cards):
 
 
 def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
+    from turn_end import finish_turn
     actions,_=get_actions(state,cards)
     results=[];frontier=[]
     deadline=time.monotonic()+time_budget
     for action in actions.values():
+        if action['kind']=='end_turn':
+            frontier.append((state,action,[]));continue
         if action['kind'] not in ('play','hero_power','attack'):continue
         transition=simulate_card(state,action,cards)
         if transition.state is None:continue
@@ -192,12 +195,39 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
         return dict(action=action,sequence=sequence,score=score,
             summary=f"{len(sequence)}步：敵英雄 {health}；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}",
             lethal=health<=0 and hp(own['heroes'][0])>0,scope='known_card_prefix',complete_turn=False)
+    def completed(snapshot,first,sequence,prefix):
+        if prefix['lethal']:
+            return dict(prefix,scope='game_ending_sequence',complete_turn=True)
+        ending=finish_turn(snapshot,cards)
+        if ending.boundary:
+            return dict(prefix,boundary=ending.boundary)
+        evaluated=[(p,evaluate(s,first,sequence)) for p,s in ending.outcomes]
+        result=dict(prefix,score=sum(p*r['score'] for p,r in evaluated),
+                    sequence=sequence+['結束回合'],complete_turn=True,scope='own_turn_end',
+                    lethal=all(r['lethal'] for _,r in evaluated),
+                    lethal_probability=sum(p for p,r in evaluated if r['lethal']),
+                    outcome_count=len(evaluated))
+        if len(evaluated)==1:
+            result['summary']='回合結束：'+evaluated[0][1]['summary']
+        else:
+            health=[];counts=[];pressure=[]
+            for _,s in ending.outcomes:
+                _,foe=sides(s)
+                health.append(max(0,hp(foe['heroes'][0])+number(foe['heroes'][0],'ARMOR')))
+                minions=[e for e in foe['board'] if e['tags'].get('CARDTYPE')=='MINION']
+                counts.append(len(minions));pressure.append(sum(number(e,'ATK') for e in minions))
+            result['summary']=(f"回合結束（隨機結算）：敵英雄 {min(health)}–{max(health)}；"
+                f"敵手下 {min(counts)}–{max(counts)}；敵場攻擊 {min(pressure)}–{max(pressure)}；"
+                f"斬殺率 {result['lethal_probability']:.0%}")
+        return result
     for depth in range(max_depth):
         frontier=sorted(frontier,key=lambda n:evaluate(*n)['score'],reverse=True)[:beam_width]
         children=[]
         for snapshot,first,sequence in frontier:
-            outcome=evaluate(snapshot,first,sequence);results.append(outcome)
-            if outcome['lethal'] or outcome['score']==-100000 or depth+1==max_depth:continue
+            outcome=evaluate(snapshot,first,sequence)
+            plan=completed(snapshot,first,sequence,outcome)
+            if first['kind']!='end_turn' or plan['complete_turn']:results.append(plan)
+            if first['kind']=='end_turn' or outcome['lethal'] or outcome['score']==-100000 or depth+1==max_depth:continue
             for action in rollout_actions(snapshot,cards):
                 if time.monotonic()>=deadline:break
                 transition=simulate_card(snapshot,action,cards)

@@ -39,8 +39,11 @@ class CardSimulationTests(unittest.TestCase):
         cards['TLC_833']={'text':PREFIX_WEAPONS['TLC_833']}
         plans=card_plans(state,cards,time_budget=1)
         self.assertTrue(plans)
-        self.assertFalse(any(p['lethal'] for p in plans))
-        self.assertIn('敵英雄 1',plans[0]['summary'])
+        after=simulate_card(state,dict(kind='attack',entity_id=1,target_id=102),cards).state
+        self.assertEqual(after['players'][1]['heroes'][0]['tags']['DAMAGE'],'2')
+        self.assertTrue(plans[0]['lethal'])
+        self.assertTrue(plans[0]['complete_turn'])
+        self.assertEqual(plans[0]['sequence'][-1],'結束回合')
         cards['TLC_833']['text']='Whenever a minion attacks, deal 1 damage'
         self.assertEqual(card_plans(state,cards,time_budget=1),[])
 
@@ -69,7 +72,8 @@ class CardSimulationTests(unittest.TestCase):
         state['players'][0]['hand']=[card];cards['9']={'text':''}
         plans=card_plans(state,cards,time_budget=1,max_depth=2)
         self.assertEqual(plans[0]['action']['key'],'o0t0')
-        self.assertEqual(len(plans[0]['sequence']),2)
+        self.assertEqual(len(plans[0]['sequence']),3)
+        self.assertTrue(plans[0]['complete_turn'])
         self.assertIn('8/8',plans[0]['summary'])
 
     def test_attack_limits_and_simultaneous_poison_shield_damage(self):
@@ -102,7 +106,8 @@ class CardSimulationTests(unittest.TestCase):
             state['players'][0]['hand'].append(card)
             cards[str(ident)]={'text':''}
         plans=card_plans(state,cards,time_budget=1)
-        self.assertEqual(len(plans[0]['sequence']),2)
+        self.assertEqual(len(plans[0]['sequence']),3)
+        self.assertEqual(plans[0]['sequence'][-1],'結束回合')
         self.assertIn('剩餘法力 1',plans[0]['summary'])
         self.assertIn(plans[0]['action']['key'],('o0','o1'))
         self.assertFalse(plans[0]['action']['key'].startswith('sim:'))
