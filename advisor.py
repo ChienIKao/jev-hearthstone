@@ -153,7 +153,7 @@ class Decider:
             self.load()
             selected_plan=None
             if plans:
-                plan_options={f'p{i}':p['summary'] for i,p in enumerate(plans)}
+                plan_options={f'p{i}':p['action']['description']+'；'+p['summary'] for i,p in enumerate(plans)}
                 plan_options['other']='改選出牌、技能或其他合法動作'
                 context=compact_state(state,self.cards)
                 context['deck_strategy']=strategy_context(self.profile)

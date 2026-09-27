@@ -8,6 +8,27 @@ from test_strategy import fixture,unit,option
 from turn_search import COMBAT_INERT
 
 class OptionTests(unittest.TestCase):
+    def test_plan_choices_identify_first_action_and_location_resources(self):
+        state,cards=fixture([],[],[option(0,5,[])])
+        location=unit(5,'1',0,3,COST=1)
+        location.update(card_id='CORE_REV_990')
+        location['tags'].update(CARDTYPE='LOCATION',ZONE='HAND')
+        state['players'][0]['hand']=[location]
+        cards['CORE_REV_990']={'name':'血紅深淵','text':COMBAT_INERT['CORE_REV_990']}
+        decider=Decider(cards);decider.load=Mock()
+        def choose(router,context,question):
+            choices=question['move']['criteria']
+            play=next(k for k,v in choices.items() if v.startswith('出牌：血紅深淵；'))
+            self.assertIn('血紅深淵 3次可用',choices[play])
+            return {'choice':play},{}
+        with patch('decision_pipeline.predict_choice',side_effect=choose):
+            result=decider.decide(state)
+        self.assertEqual(result['action']['entity_id'],5)
+        plans=result['search_plans']
+        play=next(p for p in plans if p['action']['kind']=='play')
+        passed=next(p for p in plans if p['action']['kind']=='end_turn')
+        self.assertGreater(play['score'],passed['score'])
+
     def test_plan_context_overflow_falls_back_to_legal_staged_choice(self):
         from decision_pipeline import ContextBudgetError
         state,cards=fixture([unit(1,'1',3,3,EXHAUSTED=0)],[],[option(0,1,[102])])

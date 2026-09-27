@@ -238,6 +238,17 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
         transition=simulate_card(state,action,cards)
         if transition.state is None:continue
         frontier.append((transition.state,action,[action['description']]))
+    def locations(player):return [e for e in player['board'] if e['tags'].get('CARDTYPE')=='LOCATION']
+    def location_value(player):
+        return sum(max(0,hp(e))*.5 for e in locations(player) if e.get('card_id')=='CORE_REV_990')
+    def location_summary(player):
+        return ','.join(f"{name_of(e,cards)} {max(0,hp(e))}次"+
+                        ('冷卻' if number(e,'EXHAUSTED') or number(e,'LOCATION_ACTION_COOLDOWN') else '可用')
+                        for e in locations(player)) or '無'
+    def resources(snapshot):
+        own,enemy=sides(snapshot)
+        return (f"；地標我 {location_summary(own)}／敵 {location_summary(enemy)}"
+                if locations(own) or locations(enemy) else '')
     def evaluate(snapshot,action,sequence):
         own,enemy=sides(snapshot)
         health=hp(enemy['heroes'][0])+number(enemy['heroes'][0],'ARMOR')
@@ -245,10 +256,11 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
         friendly=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in active(own)) or '空'
         hostile=','.join(f"{number(e,'ATK')}/{hp(e)}" for e in active(enemy)) or '空'
         score=sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(own))-sum(number(e,'ATK')*1.3+hp(e)*.5 for e in active(enemy))-health*.8+(hp(own['heroes'][0])+number(own['heroes'][0],'ARMOR'))*.2
+        score+=location_value(own)-location_value(enemy)
         if hp(own['heroes'][0])<=0:score=-100000
         elif health<=0:score=100000
         return dict(action=action,sequence=sequence,score=score,
-            summary=f"{len(sequence)}步：敵英雄 {health}；我英雄 {hp(own['heroes'][0])}+{number(own['heroes'][0],'ARMOR')}甲；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}",
+            summary=f"{len(sequence)}步：敵英雄 {health}；我英雄 {hp(own['heroes'][0])}+{number(own['heroes'][0],'ARMOR')}甲；我方 {friendly}；敵方 {hostile}；剩餘法力 {own['mana']}"+resources(snapshot),
             lethal=health<=0 and hp(own['heroes'][0])>0,scope='known_card_prefix',complete_turn=False)
     def completed(snapshot,first,sequence,prefix):
         if prefix['lethal']:
@@ -273,7 +285,7 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
                 counts.append(len(minions));pressure.append(sum(number(e,'ATK') for e in minions))
             result['summary']=(f"回合結束（隨機結算）：敵英雄 {min(health)}–{max(health)}；"
                 f"敵手下 {min(counts)}–{max(counts)}；敵場攻擊 {min(pressure)}–{max(pressure)}；"
-                f"斬殺率 {result['lethal_probability']:.0%}")
+                f"斬殺率 {result['lethal_probability']:.0%}")+resources(snapshot)
         threat=end_turn_threat(ending,cards,min(.004,max(0,deadline-time.monotonic())))
         result['counterattack']=threat
         probability=threat['lethal_probability']
