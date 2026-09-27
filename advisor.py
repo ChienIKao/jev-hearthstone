@@ -7,6 +7,8 @@ from pathlib import Path
 import time
 from snapshot_io import publish_text
 from strategy import compact_state, rank_actions
+from deck_profiles import strategy_context
+from hsreplay_import import decision_reference, correct_mulligan
 
 ROOT = Path(__file__).parent
 os.environ.setdefault('HF_HOME', str(ROOT / '.cache' / 'huggingface'))
@@ -14,8 +16,17 @@ os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
 os.environ.setdefault('HF_HUB_OFFLINE', '1')
 
 
+def reference_for_state(profile, state, cards):
+    if not profile or not profile.get('reference_data'):
+        return None
+    from strategy import sides
+    own,_=sides(state)
+    names={cards.get(e.get('card_id'),{}).get('name') for e in own.get('hand',[])}
+    return decision_reference(profile['reference_data'],names)
+
+
 def fingerprint(state):
-    fields = ('game_serial','games_seen','turn','game_state','players','options','option_set','options_fresh','local_controller','unresolved_events','revision')
+    fields = ('game_serial','games_seen','turn','step','game_state','players','options','option_set','options_fresh','local_controller','unresolved_events','revision','choices','sent_choice')
     return hashlib.sha256(json.dumps({k:state.get(k) for k in fields},sort_keys=True).encode()).hexdigest()
 
 
@@ -28,24 +39,32 @@ def read_state(path):
     raise ValueError('局面檔案暫時無法讀取')
 
 
-def build_request(state, cards):
+def build_request(state, cards, profile=None):
     evaluation = rank_actions(state, cards)
-    shortlist = evaluation['ranked'][:6]
+    shortlist = evaluation['ranked'] if profile else evaluation['ranked'][:6]
     if not shortlist:
         raise ValueError('目前動作尚未支援，需要手動操作')
     actions = {a['key']:a for a in shortlist}
     context = compact_state(state,cards)
+    if profile:
+        context = {'deck_strategy': strategy_context(profile), **context}
+        reference=reference_for_state(profile,state,cards)
+        if reference:
+            context['mulligan_reference']=reference
     context['visible_enemy_attack'] = evaluation['visible_enemy_attack']
     context['danger_estimate'] = evaluation['danger_estimate']
     question = {'move': {'type':'choice','instructions':'選擇最有利的爐石戰記下一步。先考慮斬殺及存活，再考慮有效交換、卡牌效果與費用組合。規則分數只是參考。不要猜未知手牌。', 'criteria':{k:a['description']+'；'+','.join(a['reasons']) for k,a in actions.items()}}}
+    if profile:
+        question['move']['instructions'] += '依照 deck_strategy 的牌組邏輯與 combo 安排順序、保留關鍵資源；只有目前合法的動作可以選擇。'
     return context, question, actions
 
 
 class Decider:
-    def __init__(self, cards, device='auto'):
+    def __init__(self, cards, device='auto', profile=None):
         self.cards=cards
         self.device=device
         self.router=None
+        self.profile=profile
 
     def load(self):
         if self.router is None:
@@ -60,6 +79,44 @@ class Decider:
 
     def decide(self,state):
         start=time.monotonic()
+        from strategy import sides, get_actions, name_of, text_of
+        from decision_pipeline import predict_choice, staged_action
+        own, _ = sides(state)
+        from choices import pending_choice
+        packet = pending_choice(state)
+        if packet is not None:
+            actions, _ = get_actions(state, self.cards)
+            self.load()
+            context = {'players': compact_state(state,self.cards), 'count_min':packet['count_min'], 'count_max':packet['count_max'], 'candidates': [
+                {'id':e['id'],'name':name_of(e,self.cards),'effect':text_of(e,self.cards)} for e in packet['cards']]}
+            context = {'deck_strategy': strategy_context(self.profile), **context}
+            question = {'move': {'type':'choice', 'instructions':'根據目前局面選擇最合適的發現牌、選項或選牌組合，考慮卡牌效果、附加效果與可用法力，配合 deck_strategy 的牌組邏輯與 combo。',
+                                'criteria':{k:a['description'] for k,a in actions.items()}}}
+            answer,budget = predict_choice(self.router,context,question)
+            if answer['choice'] not in actions:
+                raise ValueError('模型輸出不在候選選牌清單中')
+            return dict(action=actions[answer['choice']],method='laya',model_answer=answer,
+                        device=self.device,seconds=round(time.monotonic()-start,3))
+        if own.get('player_tags', {}).get('MULLIGAN_STATE') == 'INPUT':
+            actions, _ = get_actions(state, self.cards)
+            self.load()
+            from mulligan import opening_cards
+            opening, _ = opening_cards(state)
+            context = {'opening_hand': [{'id': e['id'], 'name': name_of(e,self.cards),
+                        'effect': text_of(e,self.cards)} for e in opening]}
+            context = {'deck_strategy': strategy_context(self.profile), 'players': compact_state(state,self.cards), **context}
+            reference=reference_for_state(self.profile,state,self.cards)
+            if reference:
+                context['mulligan_reference']=reference
+            question = {'move': {'type':'choice', 'instructions':'依照 deck_strategy 的起手換牌思路、牌組邏輯與目前起手牌，選擇要換掉的組合。未提供思路時保留適合前期使用的卡牌。',
+                                'criteria':{k:a['description'] for k,a in actions.items()}}}
+            answer,budget = predict_choice(self.router,context,question)
+            if answer['choice'] not in actions:
+                raise ValueError('模型输出不在起手選牌清單中')
+            chosen=actions[answer['choice']]
+            corrected=correct_mulligan((self.profile or {}).get('reference_data'),opening,self.cards,chosen,actions)
+            return dict(action=corrected,method='reference_mulligan' if corrected['key']!=chosen['key'] else 'laya',model_answer=answer,
+                        device=self.device,seconds=round(time.monotonic()-start,3))
         evaluation=rank_actions(state,self.cards)
         ranked=evaluation['ranked']
         if not ranked:
@@ -68,29 +125,16 @@ class Decider:
         if evaluation['lethal']:
             chosen=evaluation['lethal']['action']
             method='rules_lethal'
-        elif len(ranked)==1:
-            chosen=ranked[0]
+        elif len(get_actions(state,self.cards)[0])==1:
+            chosen=next(iter(get_actions(state,self.cards)[0].values()))
             method='rules_single'
         else:
-            context,question,actions=build_request(state,self.cards)
             self.load()
-            (ROOT/'last-request.json').write_text(json.dumps({'state':context,'questions':question},ensure_ascii=False,indent=2),encoding='utf-8')
-            response=self.router.predict(json.dumps(context,ensure_ascii=False),question,model='multilingual',max_len=4096,head_max_len=1024)
-            answer=response['answers']['move']
-            result['model_answer']=answer
+            chosen,trace=staged_action(state,self.cards,self.profile,
+                                      lambda context,question:predict_choice(self.router,context,question))
+            result['stages']=trace
             result['device']=self.device
-            choice=answer['choice']
-            if choice not in actions:
-                raise ValueError('模型輸出不在候選動作中')
-            probabilities=sorted(answer.get('probabilities',{}).values(),reverse=True)
-            margin=probabilities[0]-probabilities[1] if len(probabilities)>1 else 1
-            chosen=actions[choice]
-            # Operational tie-break, not a calibrated probability of winning.
-            if margin < 0.08 or chosen['rule_score'] < ranked[0]['rule_score']-8:
-                chosen=ranked[0]
-                method='rules_tiebreak'
-            else:
-                method='laya'
+            method='laya_staged'
         if chosen['kind']=='end_turn' and evaluation['unsupported_options']:
             raise ValueError('還有未支援的合法操作，請手動處理後再結束回合')
         result.update(action=chosen,method=method,seconds=round(time.monotonic()-start,3))

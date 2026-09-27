@@ -1,0 +1,158 @@
+"""Desktop presentation for the MuMu ranked assistant."""
+import tkinter as tk
+from tkinter import ttk
+import webbrowser
+
+BG='#1e1e1e'
+PANEL='#1e1e1e'
+TEXT='#dedede'
+MUTED='#989898'
+GOLD='#c4cbd0'
+
+
+def build_panel(app):
+    root=app.root
+    root.geometry('960x680')
+    root.minsize(900,640)
+    root.configure(bg=BG)
+    root.option_add('*TCombobox*Listbox.background',PANEL)
+    root.option_add('*TCombobox*Listbox.foreground',TEXT)
+    style=ttk.Style(root)
+    style.theme_use('clam')
+    style.configure('.',background=BG,foreground=TEXT,font=('Microsoft JhengHei UI',10))
+    style.configure('TFrame',background=BG)
+    style.configure('Card.TFrame',background=PANEL)
+    style.configure('TLabel',background=BG,foreground=TEXT)
+    style.configure('Muted.TLabel',foreground=MUTED)
+    style.configure('Title.TLabel',font=('Microsoft JhengHei UI',20,'bold'))
+    style.configure('Heading.TLabel',font=('Microsoft JhengHei UI',12,'bold'))
+    style.configure('TButton',background='#252525',foreground=TEXT,borderwidth=1,padding=(12,6),bordercolor='#454545',lightcolor='#454545',darkcolor='#454545',relief='flat')
+    style.map('TButton',background=[('active','#383838')])
+    style.configure('Accent.TButton',background='#262626',foreground=TEXT,font=('Microsoft JhengHei UI',10))
+    style.map('Accent.TButton',background=[('active','#3b3b3b')])
+    style.configure('Stop.TButton',background='#583437',foreground='#ffdddd')
+    style.configure('TEntry',fieldbackground=PANEL,foreground=TEXT,insertcolor=TEXT,padding=7)
+    style.configure('TCombobox',fieldbackground=PANEL,background='#252525',foreground=TEXT,padding=6)
+    style.map('TCombobox',fieldbackground=[('readonly',PANEL)],foreground=[('readonly',TEXT)])
+    style.configure('TSpinbox',fieldbackground=PANEL,foreground=TEXT,padding=6)
+    style.configure('TNotebook',background=BG,borderwidth=0)
+    for name in ('TNotebook','TNotebook.Tab','TEntry','TCombobox','TSpinbox'):
+        style.configure(name,bordercolor='#404040',lightcolor=BG,darkcolor=BG)
+    style.configure('TNotebook.Tab',padding=(48,9),background=PANEL,foreground=MUTED)
+    style.map('TNotebook.Tab',background=[('selected',BG)],foreground=[('selected',TEXT)],padding=[('selected',(48,9)),('!selected',(48,9))])
+    style.configure('Treeview',background=PANEL,fieldbackground=PANEL,foreground=TEXT,rowheight=30,borderwidth=0)
+    style.configure('Treeview.Heading',background='#252525',foreground=MUTED,padding=7)
+    style.configure('Treeview',bordercolor='#404040',lightcolor=BG,darkcolor=BG,relief='flat')
+    style.configure('Treeview.Heading',bordercolor='#404040',lightcolor=BG,darkcolor=BG,relief='flat')
+    style.configure('TSeparator',background='#404040')
+    style.map('Treeview',background=[('selected','#4b5967')])
+    shell=ttk.Frame(root,padding=0);shell.pack(fill='both',expand=True)
+    nav=tk.Frame(shell,bg=BG)
+    nav.pack(fill='x')
+    style.layout('Pages.TNotebook.Tab',[])
+    book=ttk.Notebook(shell,style='Pages.TNotebook');book.pack(fill='both',expand=True)
+    ranked=ttk.Frame(book,padding=(28,28));library=ttk.Frame(book,padding=24);advanced=ttk.Frame(book,padding=24)
+    book.add(ranked,text='排位作業');book.add(library,text='牌組與環境');book.add(advanced,text='進階設定')
+    preview=ttk.Frame(book,padding=16)
+    book.insert(2,preview,text='遊戲畫面')
+    navigation=[]
+    def select_page(page):
+        book.select(page)
+        for target,button,line in navigation:
+            button.configure(fg=TEXT if target is page else MUTED)
+            line.configure(bg='#687781' if target is page else '#383838')
+    for column,(page,title) in enumerate([(ranked,'排位作業'),(library,'牌組與環境'),(preview,'遊戲畫面'),(advanced,'進階設定')]):
+        nav.columnconfigure(column,weight=1,uniform='tabs')
+        cell=tk.Frame(nav,bg=BG)
+        cell.grid(row=0,column=column,sticky='ew')
+        button=tk.Button(cell,text=title,command=lambda page=page:select_page(page),
+                         bg=BG,fg=MUTED,activebackground='#282828',activeforeground=TEXT,
+                         relief='flat',borderwidth=0,highlightthickness=0,pady=11,
+                         font=('Microsoft JhengHei UI',10))
+        button.pack(fill='x')
+        line=tk.Frame(cell,height=2,bg='#383838');line.pack(fill='x')
+        navigation.append((page,button,line))
+    select_page(ranked)
+    sidebar=ttk.Frame(ranked,width=210)
+    sidebar.pack(side='left',fill='y',padx=(0,48))
+    sidebar.pack_propagate(False)
+    tasks=tk.Frame(sidebar,bg=BG,highlightbackground='#404040',highlightthickness=1)
+    tasks.pack(fill='both',expand=True,pady=(0,16))
+    ttk.Label(tasks,text='☑   連續爬排位',foreground=TEXT).pack(anchor='w',padx=18,pady=(18,12))
+    for name in ('每日任務','每週任務','活動任務'):
+        ttk.Label(tasks,text='□   '+name+' · 待開放',foreground=MUTED).pack(anchor='w',padx=18,pady=8)
+    ttk.Label(sidebar,text='任務完成後',anchor='center').pack(fill='x',pady=(0,5))
+    ttk.Label(sidebar,text='停止操作',anchor='center',style='Muted.TLabel').pack(fill='x',pady=(0,16))
+    ttk.Button(sidebar,text='開始',command=app.ranked).pack(fill='x',padx=35,ipady=7)
+    ttk.Button(sidebar,text='停止 · F8',command=app.cancel).pack(fill='x',padx=35,pady=(8,0))
+    settings=ttk.Frame(ranked)
+    settings.pack(side='left',fill='both',expand=True)
+    ttk.Label(settings,text='連續爬排位').pack(anchor='w',pady=(0,22))
+    controls=ttk.Frame(settings);controls.pack(fill='x',pady=(0,16))
+    ttk.Label(controls,text='使用牌組').grid(row=0,column=0,sticky='w',pady=(0,8))
+    app.deck_picker=ttk.Combobox(controls,state='readonly',width=22)
+    app.deck_picker.grid(row=1,column=0,sticky='ew',padx=(0,12))
+    app.deck_picker.bind('<<ComboboxSelected>>',app.select_deck)
+    ttk.Button(controls,text='編輯打法',command=app.edit_deck).grid(row=1,column=1,padx=(0,22))
+    ttk.Label(controls,text='執行局數 · 0 為持續',style='Muted.TLabel').grid(row=2,column=0,sticky='w',pady=(18,8))
+    app.game_limit=tk.StringVar(value='0')
+    ttk.Spinbox(controls,from_=0,to=999,textvariable=app.game_limit,width=9).grid(row=3,column=0,sticky='w',padx=(0,18))
+    ttk.Button(controls,text='連線',command=app.connect).grid(row=3,column=1,padx=(0,8),sticky='w')
+    ttk.Label(settings,textvariable=app.status,wraplength=560,foreground=GOLD).pack(anchor='w',pady=(0,6))
+    ttk.Label(settings,textvariable=app.summary,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
+    ttk.Separator(settings).pack(fill='x',pady=16)
+    ttk.Label(settings,text='執行紀錄').pack(anchor='w',pady=(0,10))
+    app.run_log=tk.Text(settings,height=10,wrap='word',state='disabled',bg=PANEL,fg=MUTED,
+                        relief='flat',padx=0,pady=4,font=('Microsoft JhengHei UI',10))
+    app.run_log.pack(fill='both',expand=True)
+    ttk.Button(preview,text='更新預覽',command=app.refresh).pack(side='bottom',anchor='e',pady=(10,0))
+    observed=ttk.Frame(preview,width=310)
+    observed.pack(side='right',fill='y',padx=(16,0))
+    ttk.Label(observed,text='目前辨識資料').pack(anchor='w',pady=(0,10))
+    app.observation_text=tk.Text(observed,width=34,wrap='word',state='disabled',bg=BG,fg=TEXT,
+                                 relief='flat',font=('Microsoft JhengHei UI',10))
+    scroll=ttk.Scrollbar(observed,command=app.observation_text.yview)
+    scroll.pack(side='right',fill='y')
+    app.observation_text.configure(yscrollcommand=scroll.set)
+    app.observation_text.pack(fill='both',expand=True)
+    app.canvas=tk.Canvas(preview,width=560,height=420,bg=BG,highlightthickness=1,highlightbackground='#404040')
+    app.canvas.pack(fill='both',expand=True)
+    app.canvas.bind('<Configure>',app.render_preview)
+    app.canvas.create_text(480,245,text='準備好你的下一場對局',fill=TEXT,font=('Microsoft JhengHei UI',21,'bold'))
+    app.canvas.create_text(480,292,text='開啟 MuMu 與爐石，連線後即可預覽遊戲畫面。',fill=MUTED,font=('Microsoft JhengHei UI',11))
+    ttk.Label(library,text='牌組與打法',style='Heading.TLabel').pack(anchor='w')
+    ttk.Label(library,text='每副牌組保存自己的模式、起手換牌、資源安排與 combo。',style='Muted.TLabel').pack(anchor='w',pady=(8,20))
+    row=ttk.Frame(library);row.pack(anchor='w')
+    ttk.Button(row,text='新增牌組',style='Accent.TButton',command=lambda:app.edit_deck(True)).pack(side='left',padx=(0,10))
+    ttk.Button(row,text='編輯目前牌組',command=app.edit_deck).pack(side='left')
+    ttk.Separator(library).pack(fill='x',pady=30)
+    ttk.Label(library,text='HSReplay 環境資料',style='Heading.TLabel').pack(anchor='w')
+    ttk.Label(library,text='從單一牌組的留牌指南匯入公開統計，保存來源、分段與時間範圍。\n相關手牌的數據會提供給 Laya；環境與 combo 心得可在「編輯目前牌組」保存。',style='Muted.TLabel',wraplength=850).pack(anchor='w',pady=12)
+    refrow=ttk.Frame(library);refrow.pack(anchor='w',pady=(0,10))
+    ttk.Button(refrow,text='匯入留牌參考',command=app.import_reference).pack(side='left',padx=(0,10))
+    ttk.Button(refrow,text='查看已保存資料',command=app.show_reference).pack(side='left')
+    ttk.Button(refrow,text='匯入環境榜',command=lambda:app.import_reference(True)).pack(side='left',padx=(10,0))
+    ttk.Button(refrow,text='環境榜快照',command=app.show_meta).pack(side='left',padx=(10,0))
+    ttk.Button(library,text='開啟 HSReplay 環境榜 ↗',command=lambda:webbrowser.open('https://hsreplay.net/zh-hant/meta/')).pack(anchor='w')
+    def open_source():
+        profile=app.profiles.selected() or {}
+        if profile.get('source_url'):
+            webbrowser.open(profile['source_url'])
+        else:
+            app.edit_deck()
+    ttk.Button(library,text='開啟目前牌組來源 ↗',command=open_source).pack(anchor='w',pady=(8,0))
+    ttk.Separator(library).pack(fill='x',pady=30)
+    ttk.Label(library,text='後續版本',style='Heading.TLabel').pack(anchor='w')
+    ttk.Label(library,text='每日任務  /  每週任務  /  活動任務\n目前先完成排位作業；任務自動化尚未開放。',style='Muted.TLabel').pack(anchor='w',pady=12)
+    ttk.Label(advanced,text='裝置連線',style='Heading.TLabel').pack(anchor='w',pady=(0,10))
+    ttk.Label(advanced,text='ADB 路徑',style='Muted.TLabel').pack(anchor='w')
+    ttk.Entry(advanced,textvariable=app.adb,width=85).pack(fill='x',pady=(4,12))
+    ttk.Label(advanced,text='MuMu 裝置位址',style='Muted.TLabel').pack(anchor='w')
+    ttk.Entry(advanced,textvariable=app.serial,width=30).pack(anchor='w',pady=(4,22))
+    ttk.Label(advanced,text='操作間隔 2.5 秒 · 未確認且局面未變時最多重試一次\n換牌及多步選取不自動重送，避免取消原選取。',style='Muted.TLabel').pack(anchor='w',pady=(0,16))
+    row=ttk.Frame(advanced);row.pack(fill='x',pady=(0,18))
+    for text,command in [('連續接手本局',app.continuous),('Laya 做一步',app.decide),('校準畫面',app.calibrate),('執行所選動作',app.execute_selected)]:
+        ttk.Button(row,text=text,command=command).pack(side='left',padx=(0,8))
+    app.table=ttk.Treeview(advanced,columns=('description',),show='headings',height=10)
+    app.table.heading('description',text='目前合法動作');app.table.pack(fill='both',expand=True)
+    app.update_deck_picker()

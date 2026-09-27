@@ -1,2 +1,6 @@
 laya==0.3.20
 maafw==5.14.0
+numpy==2.5.3
+rapidocr==3.9.2
+onnxruntime==1.30.0
+Pillow==12.3.0

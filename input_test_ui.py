@@ -7,6 +7,7 @@ from strategy import get_actions
 from advisor import read_state
 
 METHODS={
+    '即時畫面背景操作':('window_preview','原位置顯示 Windows 即時遊戲投影；底層視窗在背景對齊，完成後還原。'),
     'Maa SendMessage（不移動視窗）':('sendmessage','MaaFramework 普通 SendMessage；不啟用游標或視窗位置對齊。'),
     'Maa PostMessage（不移動視窗）':('maa_postmessage','MaaFramework 普通 PostMessage，含官方啟用訊息流程；不啟用位置對齊。'),
     'PostMessage（背景訊息）':('postmessage','不移動游標。先前未確認成功，仍可重新測試。'),
@@ -26,7 +27,7 @@ class InputTestWindow:
         frame.pack(fill='both',expand=True)
         ttk.Label(frame,text='輸入測試台',font=('Microsoft JhengHei',19,'bold')).pack(anchor='w')
         ttk.Label(frame,text='每次只測一個動作。先保持滑鼠靜止；之後再測手動移動是否影響結果。',wraplength=880).pack(anchor='w',pady=6)
-        self.method=tk.StringVar(value='視窗對齊 SendMessage')
+        self.method=tk.StringVar(value='即時畫面背景操作')
         chooser=ttk.Combobox(frame,textvariable=self.method,values=list(METHODS),state='readonly',width=45)
         chooser.pack(anchor='w')
         self.description=tk.StringVar()

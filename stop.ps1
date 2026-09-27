@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath($PSScriptRoot)
-$roles = @('app','reader','advisor')
+$roles = @('android_app','app','reader','advisor')
 $workers = Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^pythonw?\.exe$' }
 foreach ($role in $roles) {
     $scriptPath = Join-Path $projectRoot "$role.py"

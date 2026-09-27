@@ -8,6 +8,39 @@ class Job:
     def wait(self):return self
 
 class TouchTests(unittest.TestCase):
+    def test_client_coordinates_follow_mid_gesture_dpi_resize(self):
+        backend=MaaTouchInput.__new__(MaaTouchInput)
+        size=[(1920,1000)]
+        backend.set_coordinate_space(1920,1000,lambda:size[0])
+        self.assertEqual(backend._point((1200,800)),(1200,800))
+        size[0]=(2400,1250)
+        self.assertEqual(backend._point((1200,800)),(1500,1000))
+        size[0]=(1366,768)
+        self.assertEqual(backend._point((1200,800)),(867,614))
+        size[0]=(0,0)
+        with self.assertRaises(ValueError):backend._point((1200,800))
+
+    def test_window_click_tracks_target_through_press_and_always_releases(self):
+        events=[]
+        class Controller:
+            def post_touch_down(self,*point):events.append(('down',point));return Job()
+            def post_touch_move(self,*point):events.append(('move',point));return Job()
+            def post_touch_up(self):events.append(('up',));return Job()
+        backend=MaaTouchInput.__new__(MaaTouchInput)
+        backend.method='sendmessage_window'
+        backend.controller=Controller()
+        with patch('maa_input.time.sleep'):
+            backend.click((200,300),lambda:None)
+        self.assertEqual(events[0],('down',(200,300)))
+        self.assertEqual(events[1:7],[('move',(200,300))]*6)
+        self.assertEqual(events[7],('up',))
+        checks=iter([None,ValueError('stopped')])
+        def check():
+            value=next(checks)
+            if value:raise value
+        with self.assertRaises(ValueError):backend.click((200,300),check)
+        self.assertEqual(events[-1],('up',))
+
     def test_alignment_recomputes_coordinates_after_dpi_resize(self):
         backend=Mock()
         stop=Mock()

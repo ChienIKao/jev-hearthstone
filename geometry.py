@@ -10,17 +10,39 @@ def resized_layout(layout,width,height):
     factor=(height/base_h)*(base_w/width)
     def point(p):
         return [0.5+(p[0]-0.5)*factor,p[1]]
-    for key in ('hero_me','hero_enemy','power_me','end_turn','play_area'):
+    for key in ('hero_me','hero_enemy','power_me','end_turn','play_area','mulligan_confirm','choice_confirm'):
+        if key not in layout:
+            continue
         result[key]=point(layout[key])
     for key in ('board_center','hand_center'):
         result[key]=0.5+(layout[key]-0.5)*factor
     for key in ('board_step','hand_step','hand_max_span'):
         result[key]=layout[key]*factor
     result['hand_span_limit']=layout.get('hand_span_limit',0.36)*factor
-    for key in ('hand_overrides','board_overrides'):
+    for key in ('hand_overrides','board_overrides','mulligan_overrides','choice_overrides'):
         result[key]={name:[point(p) for p in points] for name,points in layout.get(key,{}).items()}
+    result['choice_card_overrides']={key:point(p) for key,p in layout.get('choice_card_overrides',{}).items()}
     result.update(width=width,height=height)
     return result
+
+
+def mulligan_points(count, layout):
+    if count not in (3, 4):
+        raise ValueError('起手選牌必須是 3 或 4 張')
+    saved = layout.get('mulligan_overrides', {}).get(str(count))
+    if saved is None:
+        raise ValueError(f'請先校準 {count} 張起手牌與確認按鈕')
+    return _checked(saved, count)
+
+
+def choice_points(count, layout, card_ids=None):
+    special=layout.get('choice_card_overrides',{})
+    if card_ids and len(card_ids)==count and all(card in special for card in card_ids):
+        return [_checked([special[card]],1)[0] for card in card_ids]
+    saved = layout.get('choice_overrides', {}).get(str(count))
+    if saved is None:
+        raise ValueError(f'請先校準 {count} 個候選選項的位置')
+    return _checked(saved, count)
 
 def _checked(points, count):
     if len(points)!=count or any(len(p)!=2 or not all(0.01<=v<=0.99 for v in p) for p in points):

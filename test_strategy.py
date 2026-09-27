@@ -1,5 +1,5 @@
 import unittest
-from strategy import rank_actions, max_spend, get_actions, card_cost
+from strategy import rank_actions, max_spend, get_actions, card_cost, compact_state
 
 
 def unit(key, side, attack=3, health=3, **tags):
@@ -22,6 +22,49 @@ def option(idx,source,targets):
 
 
 class StrategyTests(unittest.TestCase):
+    def test_context_includes_dragon_race_and_remaining_weapon_durability(self):
+        state,cards=fixture([],[],[])
+        dragon=unit(50,'1',COST=5)
+        dragon['tags']['ZONE']='HAND'
+        state['players'][0]['hand']=[dragon]
+        cards['50']=dict(name='Dragon',races=['DRAGON'],cost=8)
+        weapon=unit(51,'1',DURABILITY=3,DAMAGE=1)
+        weapon['tags']['CARDTYPE']='WEAPON'
+        state['players'][0]['weapons']=[weapon]
+        context=compact_state(state,cards)
+        self.assertEqual(context['me']['hand'][0]['printed_races'],['DRAGON'])
+        self.assertEqual(context['me']['hand'][0]['cost'],5)
+        self.assertEqual(context['me']['weapons'][0]['durability'],2)
+        self.assertIsNone(context['me']['weapons'][0]['cost'])
+        del weapon['tags']['DURABILITY']
+        self.assertIsNone(compact_state(state,cards)['me']['weapons'][0]['durability'])
+
+    def test_unavailable_special_option_does_not_block_end_turn(self):
+        special=option(0,50,[])
+        special.update(error='REQ_NOT_ENOUGH_MANA',unsupported=True)
+        state,cards=fixture([],[],[special])
+        actions,unsupported=get_actions(state,cards)
+        self.assertEqual(list(actions),['o99'])
+        self.assertEqual(unsupported,[])
+        special['error']='NONE'
+        self.assertEqual(get_actions(state,cards)[1],[0])
+
+    def test_unavailable_alternative_does_not_hide_playable_card(self):
+        play=option(0,50,[])
+        alternative=option(1,50,[])
+        alternative.update(error='REQ_NOT_ENOUGH_MANA',unsupported=True)
+        state,cards=fixture([],[],[play,alternative])
+        card=unit(50,'1',COST=2)
+        card['tags']['ZONE']='HAND'
+        state['players'][0]['hand']=[card]
+        actions,unsupported=get_actions(state,cards)
+        self.assertEqual(actions['o0']['kind'],'play')
+        self.assertEqual(unsupported,[])
+        alternative['error']='NONE'
+        actions,unsupported=get_actions(state,cards)
+        self.assertNotIn('o0',actions)
+        self.assertEqual(unsupported,[0,1])
+
     def test_zero_cost_coin_without_cost_tag_is_playable_at_zero_mana(self):
         state,cards=fixture([],[],[option(0,50,[])])
         state['players'][0]['mana']=0

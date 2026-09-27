@@ -20,6 +20,11 @@ class State:
         self.options_collecting = False
         self.game_serial = None
         self.revision = 0
+        self.choices = {}
+        self.choice_current = None
+        self.sent_choice = None
+        self.sent_option = None
+        self.sent_collecting = False
         config = Path(__file__).parent / 'config.json'
         self.local_name = json.loads(config.read_text(encoding='utf-8-sig')).get('local_player_name') if config.exists() else None
 
@@ -47,6 +52,51 @@ class State:
         return None
 
     def feed(self, line):
+        sent=re.search(r'GameState\.SendOption\(\) - selectedOption=(\d+) selectedSubOption=(-?\d+) selectedTarget=(\d+) selectedPosition=(\d+)',line)
+        if sent:
+            self.revision+=1
+            self.sent_option=dict(option_index=int(sent[1]),sub_option=int(sent[2]),
+                                  target_id=int(sent[3]),position=int(sent[4]),revision=self.revision)
+            return
+        choice_prefix = 'GameState.DebugPrintEntityChoices() - '
+        if choice_prefix in line:
+            text = line.split(choice_prefix, 1)[1].strip()
+            head = re.match(r'id=(\d+) Player=(.*?) TaskList=\d* ChoiceType=(\S+) CountMin=(\d+) CountMax=(\d+)', text)
+            if head:
+                if self.choice_current is not None:
+                    self.choice_current['complete'] = True
+                self.revision += 1
+                player = self.resolve(head[2])
+                controller = self.entities.get(player, {}).get('tags', {}).get('PLAYER_ID')
+                self.choice_current = dict(id=int(head[1]), type=head[3], entities=[], complete=False, revision=self.revision)
+                if head[3] != 'MULLIGAN':
+                    self.choice_current.update(count_min=int(head[4]), count_max=int(head[5]))
+                if controller:
+                    self.choices[controller] = self.choice_current
+            else:
+                entity = re.match(r'Entities\[(\d+)\]=(.*)', text)
+                if entity and self.choice_current is not None:
+                    self.choice_current['entities'].append(self.resolve(entity[2]))
+            return
+        if self.choice_current is not None:
+            self.choice_current['complete'] = True
+            self.choice_current = None
+        sent_prefix = 'GameState.SendChoices() - '
+        if sent_prefix in line:
+            text = line.split(sent_prefix, 1)[1].strip()
+            head = re.match(r'id=(\d+) ChoiceType=(\S+)', text)
+            if head:
+                self.revision += 1
+                self.sent_choice = dict(id=int(head[1]), type=head[2], entities=[], complete=False, revision=self.revision)
+                self.sent_collecting = True
+            else:
+                entity = re.match(r'm_chosenEntities\[\d+\]=(.*)', text)
+                if entity and self.sent_collecting:
+                    self.sent_choice['entities'].append(self.resolve(entity[1]))
+            return
+        if self.sent_collecting:
+            self.sent_choice['complete'] = True
+            self.sent_collecting = False
         option_prefix = 'GameState.DebugPrintOptions() - '
         if option_prefix in line:
             text = line.split(option_prefix, 1)[1].strip()
@@ -87,6 +137,11 @@ class State:
         self.revision += 1
         text = line.split(prefix, 1)[1].strip()
         if text == 'CREATE_GAME':
+            self.sent_option = None
+            self.choices = {}
+            self.choice_current = None
+            self.sent_choice = None
+            self.sent_collecting = False
             self.game_serial = line.split(' GameState.', 1)[0].strip()
             self.options = []
             self.option_set = None
@@ -138,6 +193,10 @@ class State:
             self.current = None
 
     def snapshot(self):
+        for packet in self.choices.values():
+            if packet['type'] != 'MULLIGAN':
+                packet['cards'] = [self.entities.get(eid, {'id': eid, 'card_id': '', 'tags': {}})
+                                   for eid in packet['entities']]
         players = []
         for entity in self.entities.values():
             tags = entity['tags']
@@ -151,9 +210,9 @@ class State:
             mana = None
             if 'RESOURCES' in tags:
                 mana = int(tags['RESOURCES']) - int(tags.get('RESOURCES_USED', 0)) + int(tags.get('TEMP_RESOURCES', 0))
-            players.append({'controller': controller, 'current_player': tags.get('CURRENT_PLAYER'), 'mana': mana, 'resource_tags': {k: tags[k] for k in mana_keys if k in tags}, 'hand': zone('HAND'), 'board': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') in ('MINION', 'LOCATION')], 'heroes': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'HERO'], 'hero_powers': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'HERO_POWER'], 'weapons': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'WEAPON'], 'secret_count': len(zone('SECRET')), 'deck_count': len(zone('DECK')), 'player_tags': {k: tags[k] for k in ('MULLIGAN_STATE','PLAYSTATE','FATIGUE','SPELLPOWER','HEALING_DOES_DAMAGE','TIMEOUT') if k in tags}})
+            players.append({'controller': controller, 'current_player': tags.get('CURRENT_PLAYER'), 'mana': mana, 'resource_tags': {k: tags[k] for k in mana_keys if k in tags}, 'hand': zone('HAND'), 'board': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') in ('MINION', 'LOCATION')], 'heroes': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'HERO'], 'hero_powers': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'HERO_POWER'], 'weapons': [e for e in zone('PLAY') if e['tags'].get('CARDTYPE') == 'WEAPON'], 'secret_count': len(zone('SECRET')), 'deck_count': len(zone('DECK')), 'player_tags': {k: tags[k] for k in ('FIRST_PLAYER','MULLIGAN_STATE','PLAYSTATE','FATIGUE','SPELLPOWER','HEALING_DOES_DAMAGE','TIMEOUT') if k in tags}})
         game = next((e['tags'] for e in self.entities.values() if e['tags'].get('CARDTYPE') == 'GAME'), {})
-        return {'game_serial': self.game_serial, 'revision': self.revision, 'games_seen': self.games, 'turn': game.get('TURN'), 'step': game.get('STEP'), 'game_state': game.get('STATE'), 'players': players, 'unresolved_events': self.unresolved, 'local_controller': self.player_names.get(self.local_name), 'options': self.options, 'option_set': self.option_set, 'options_fresh': self.options_fresh and not self.options_collecting, 'status': 'observed_partial_state' if players else 'waiting_for_game'}
+        return {'enchantments': [dict(e, tags=dict(e['tags'])) for e in self.entities.values() if e['tags'].get('CARDTYPE') == 'ENCHANTMENT'], 'choices': self.choices, 'sent_choice': self.sent_choice, 'sent_option': self.sent_option, 'game_serial': self.game_serial, 'revision': self.revision, 'games_seen': self.games, 'turn': game.get('TURN'), 'step': game.get('STEP'), 'game_state': game.get('STATE'), 'players': players, 'unresolved_events': self.unresolved, 'local_controller': self.player_names.get(self.local_name), 'options': self.options, 'option_set': self.option_set, 'options_fresh': self.options_fresh and not self.options_collecting, 'status': 'observed_partial_state' if players else 'waiting_for_game'}
 
 def main():
     parser = argparse.ArgumentParser()
@@ -196,9 +255,8 @@ def main():
             position = stream.tell()
         if data:
             last_data = time.monotonic()
-        elif state.options_collecting and not pending and time.monotonic() - last_data >= 0.2:
-            state.options_collecting = False
-            state.options_fresh = True
+        elif (state.options_collecting or state.choice_current is not None or state.sent_collecting) and not pending and time.monotonic() - last_data >= 0.2:
+            state.feed('')
         # Buffer bytes so a partial UTF-8 character survives a polling boundary.
         if isinstance(pending, str):
             pending = b''

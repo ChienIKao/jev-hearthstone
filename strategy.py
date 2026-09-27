@@ -54,6 +54,14 @@ def get_actions(state, cards):
     if state.get('game_state') != 'RUNNING':
         raise ValueError('等待進入對局')
     own, enemy = sides(state)
+    from choices import pending_choice, choice_actions
+    if pending_choice(state) is not None:
+        return choice_actions(state, cards), []
+    if own.get('player_tags', {}).get('MULLIGAN_STATE') == 'INPUT':
+        if state.get('unresolved_events'):
+            raise ValueError('玩家事件尚未完整解析')
+        from mulligan import mulligan_actions
+        return mulligan_actions(state, cards), []
     if own.get('current_player') != '1':
         raise ValueError('等待我方回合')
     if own.get('player_tags', {}).get('MULLIGAN_STATE') not in (None, 'DONE'):
@@ -67,11 +75,14 @@ def get_actions(state, cards):
     entities = entity_map(state)
     counts = {}
     for o in state['options']:
-        counts[o.get('entity_id')] = counts.get(o.get('entity_id'), 0) + 1
+        if o['type'] == 'POWER' and o['error'] == 'NONE':
+            counts[o.get('entity_id')] = counts.get(o.get('entity_id'), 0) + 1
     actions = {}
     unsupported = []
     for option in state['options']:
         key = 'o' + str(option['index'])
+        if option['type'] == 'POWER' and option['error'] != 'NONE':
+            continue
         if option.get('unsupported'):
             unsupported.append(option['index'])
             continue
@@ -124,10 +135,18 @@ def get_actions(state, cards):
 def compact_state(state, cards):
     own, enemy = sides(state)
     def card(e):
-        value = {'id': e['id'], 'name': name_of(e, cards), 'cost': number(e, 'COST'), 'atk': number(e, 'ATK'), 'hp': hp(e), 'armor': number(e, 'ARMOR'), 'effect': text_of(e, cards)}
+        definition=cards.get(e.get('card_id'),{})
+        value = {'id': e['id'], 'name': name_of(e, cards), 'cost': card_cost(e,cards), 'atk': number(e, 'ATK'), 'hp': hp(e), 'armor': number(e, 'ARMOR'), 'effect': text_of(e, cards)}
+        value['card_type']=e.get('tags',{}).get('CARDTYPE',definition.get('type'))
+        value['printed_races']=definition.get('races') or ([definition['race']] if definition.get('race') else [])
+        if 'CARDRACE' in e.get('tags',{}):
+            value['race_tag']=e['tags']['CARDRACE']
+        if value['card_type']=='WEAPON':
+            value['durability']=(max(0,number(e,'DURABILITY')-number(e,'DAMAGE'))
+                                 if 'DURABILITY' in e.get('tags',{}) else None)
         value['tags'] = [k for k in ('TAUNT','DIVINE_SHIELD','POISONOUS','LIFESTEAL','FROZEN','EXHAUSTED','STEALTH','IMMUNE','SILENCED') if number(e, k)]
         return value
-    return {'turn': state['turn'], 'mana': own['mana'], 'me': {z: [card(e) for e in own.get(z, [])] for z in ZONES}, 'opponent': {z: [card(e) for e in enemy.get(z, [])] for z in ('board','heroes','weapons')}, 'opponent_hand_count': len(enemy['hand']), 'opponent_secrets': enemy.get('secret_count', 0)}
+    return {'turn': state.get('turn'), 'mana': own.get('mana'), 'me': {z: [card(e) for e in own.get(z, [])] for z in ZONES}, 'opponent': {z: [card(e) for e in enemy.get(z, [])] for z in ('board','heroes','weapons')}, 'opponent_hand_count': len(enemy.get('hand',[])), 'opponent_secrets': enemy.get('secret_count', 0)}
 
 
 def max_spend(actions, mana, exclude=None):

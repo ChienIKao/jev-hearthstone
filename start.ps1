@@ -1,6 +1,8 @@
+param([switch]$HandsOnly, [switch]$Windows)
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
-foreach ($role in @('reader','advisor','app')) {
+$roles = if (-not $Windows) { @('android_app') } elseif ($HandsOnly) { @('reader','app') } else { @('reader','advisor','app') }
+foreach ($role in $roles) {
     $pidFile = Join-Path $PSScriptRoot "$role.pid"
     $alive = $false
     if (Test-Path -LiteralPath $pidFile) {

@@ -1,5 +1,6 @@
 """MaaFramework background input and pseudo-minimized capture."""
 import time
+import math
 
 
 def align_plan(backend,make_plan,get_rect,stop_event):
@@ -21,6 +22,7 @@ def align_plan(backend,make_plan,get_rect,stop_event):
 
 class MaaTouchInput:
     def __init__(self,hwnd,method='anchored_touch'):
+        self.method=method
         from maa.controller import Win32Controller
         from maa.define import MaaWin32InputMethodEnum as Input, MaaWin32ScreencapMethodEnum as Capture
         methods={'anchored_touch':Input.AnchoredTouch,'sendmessage_window':Input.SendMessageWithWindowPos,'sendmessage':Input.SendMessage,'maa_postmessage':Input.PostMessage}
@@ -34,9 +36,55 @@ class MaaTouchInput:
         if not job.wait().succeeded:
             raise ValueError('MaaFramework 操作失敗，未切換其他輸入方式')
 
+    def set_coordinate_space(self, width, height, get_size):
+        self.coordinate_space=(width,height,get_size)
+
+    def _point(self,point):
+        space=getattr(self,'coordinate_space',None)
+        if space is None:
+            return point
+        base_width,base_height,get_size=space
+        width,height=get_size()
+        if min(width,height,base_width,base_height)<=0:
+            raise ValueError('遊戲尺寸無效')
+        x=width/2+(point[0]-base_width/2)*height/base_height
+        y=point[1]*height/base_height
+        if not all(math.isfinite(v) for v in (x,y)) or not (.01*width<=x<=.99*width and .01*height<=y<=.99*height):
+            raise ValueError('跨螢幕後座標超出遊戲範圍')
+        return round(x),round(y)
+
+    def _prepare_press(self,point,check):
+        space=getattr(self,'coordinate_space',None)
+        if space is None:
+            return
+        get_size=space[2]
+        for _ in range(4):
+            check()
+            before=get_size()
+            self._wait(self.controller.post_touch_move(*self._point(point)))
+            time.sleep(.04)
+            if get_size()==before:
+                return
+        raise ValueError('按下前視窗縮放仍在變動，未送出按下事件')
+
     def click(self,point,check):
         check()
-        self._wait(self.controller.post_click(*point))
+        if getattr(self,'method',None)=='sendmessage_window':
+            # Let the game's render/input loop observe both edges while the
+            # window follows a user-controlled cursor between those edges.
+            self._prepare_press(point,check)
+            try:
+                self._wait(self.controller.post_touch_down(*self._point(point)))
+                for _ in range(6):
+                    check()
+                    self._wait(self.controller.post_touch_move(*self._point(point)))
+                    time.sleep(.02)
+            finally:
+                self._wait(self.controller.post_touch_up())
+            self._wait(self.controller.post_touch_move(*self._point(point)))
+            time.sleep(.04)
+        else:
+            self._wait(self.controller.post_click(*point))
         check()
 
     def prepare_minimized(self):
@@ -51,13 +99,14 @@ class MaaTouchInput:
 
     def drag(self,start,end,check):
         check()
+        self._prepare_press(start,check)
         try:
-            self._wait(self.controller.post_touch_down(*start))
+            self._wait(self.controller.post_touch_down(*self._point(start)))
             time.sleep(.08)
             for i in range(1,17):
                 check()
                 point=tuple(round(a+(b-a)*i/16) for a,b in zip(start,end))
-                self._wait(self.controller.post_touch_move(*point))
+                self._wait(self.controller.post_touch_move(*self._point(point)))
                 time.sleep(.025)
         finally:
             self._wait(self.controller.post_touch_up())

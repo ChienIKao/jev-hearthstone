@@ -1,6 +1,7 @@
 """Pure coordinate planning and execution checks. No input is sent here."""
 import time
-from geometry import hand_points, board_points
+import math
+from geometry import hand_points, board_points, mulligan_points, choice_points
 from advisor import fingerprint
 from strategy import entity_map, get_actions, sides
 
@@ -17,6 +18,7 @@ DEFAULT_LAYOUT = {
     'hand_center':0.48, 'hand_y':0.955, 'hand_step':0.046,
     'hand_max_span':0.34, 'play_area':[0.56,0.565],
     'hand_overrides':{}, 'board_overrides':{},
+    'mulligan_overrides':{}, 'mulligan_confirm':[0.5,0.78],
 }
 
 
@@ -50,6 +52,20 @@ def validate(state,advice,layout,width,height,cards,now=None):
     if advice.get('status')!='suggestion' or advice.get('state_fingerprint')!=fingerprint(state):
         raise ValueError('建議已過期，等待重新計算')
     actions,unsupported=get_actions(state,cards)
+    if advice['action'].get('kind') == 'choice':
+        chosen = actions.get(advice['action']['key'])
+        if chosen is None or chosen != advice['action']:
+            raise ValueError('候選選項已變更')
+        choice_points(len(chosen['choice_ids']),layout,chosen.get('choice_card_ids'))
+        if chosen.get('requires_confirm') and not layout.get('choice_confirm'):
+            raise ValueError('請先校準多選的確認按鈕')
+        return chosen
+    if advice['action'].get('kind') == 'mulligan':
+        chosen = actions.get(advice['action']['key'])
+        if chosen is None or any(chosen.get(k) != advice['action'].get(k) for k in ('replace_ids','opening_ids','choice_id','kind')):
+            raise ValueError('起手選牌指令已失效')
+        mulligan_points(len(chosen['opening_ids']), layout)
+        return chosen
     own,enemy=sides(state)
     for player in (own,enemy):
         positions=[int(e['tags'].get('ZONE_POSITION',0)) for e in player['board']]
@@ -72,6 +88,27 @@ def validate(state,advice,layout,width,height,cards,now=None):
 
 def build_plan(state,action,layout):
     kind=action['kind']
+    if kind=='choice':
+        points=choice_points(len(action['choice_ids']),layout,action.get('choice_card_ids'))
+        plan=[]
+        for i in action['choice_indices']:
+            plan.append({'op':'click','point':points[i]})
+            if action['requires_confirm']:
+                plan.append({'op':'wait','seconds':.2})
+        if action['requires_confirm']:
+            if not layout.get('choice_confirm'):
+                raise ValueError('請先校準多選的確認按鈕')
+            plan.append({'op':'click','point':layout['choice_confirm']})
+        return plan
+    if kind=='mulligan':
+        points=mulligan_points(len(action['opening_ids']),layout)
+        selected=set(action['replace_ids'])
+        plan=[]
+        for entity_id,point in zip(action['opening_ids'],points):
+            if entity_id in selected:
+                plan.extend([{'op':'click','point':point},{'op':'wait','seconds':0.2}])
+        plan.append({'op':'click','point':layout['mulligan_confirm']})
+        return plan
     if kind=='end_turn':
         return [{'op':'click','point':layout['end_turn']}]
     source=point_for(action['entity_id'],state,layout)
@@ -90,9 +127,46 @@ def build_plan(state,action,layout):
     raise ValueError('此類操作尚未支援')
 
 
+def pixel_plan(plan, width, height, origin=(0, 0)):
+    """Validate the whole plan before sending the first press."""
+    result=[]
+    def pixel(point):
+        if (not isinstance(point,(list,tuple)) or len(point)!=2 or
+            not all(isinstance(v,(int,float)) and math.isfinite(v) and .01<=v<=.99 for v in point)):
+            raise ValueError('座標超出遊戲範圍')
+        return (round(origin[0]+point[0]*width),round(origin[1]+point[1]*height))
+    for command in plan:
+        item=dict(command)
+        if item['op']=='click':
+            item['point']=pixel(item['point'])
+        elif item['op']=='drag':
+            item['from'],item['to']=pixel(item['from']),pixel(item['to'])
+        elif item['op']!='wait':
+            raise ValueError('未知輸入操作')
+        result.append(item)
+    return result
+
+
 def action_succeeded(before,after,action):
     if before.get('game_serial')!=after.get('game_serial'):
         return False
+    if action['kind']=='choice':
+        sent=after.get('sent_choice') or {}
+        return (sent.get('complete') is True and sent.get('type')==action['choice_type'] and
+                sent.get('id')==action['choice_id'] and sorted(sent.get('entities',[]))==sorted(action['selected_ids']) and
+                sent!=before.get('sent_choice'))
+    if action['kind']=='mulligan':
+        sent=after.get('sent_choice') or {}
+        kept=[e for e in action['opening_ids'] if e not in action['replace_ids']]
+        return (sent.get('complete') is True and sent.get('type')=='MULLIGAN' and
+                sent.get('id')==action['choice_id'] and
+                sorted(sent.get('entities',[]))==sorted(kept) and
+                sent != before.get('sent_choice'))
+    if 'sent_option' in after:
+        sent=after.get('sent_option') or {}
+        if (sent==before.get('sent_option') or sent.get('option_index')!=action.get('option_index')
+                or sent.get('target_id')!=action.get('target_id',0)):
+            return False
     if after.get('game_state')=='COMPLETE':
         return True
     old_me,_=sides(before)
