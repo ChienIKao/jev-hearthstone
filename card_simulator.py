@@ -27,6 +27,8 @@ def simulate_card(state,action,cards):
     if source is None:return Transition(None,'來源不在目前局面')
     if source['tags'].get('CONTROLLER')!=own['controller']:
         return Transition(None,'不是我方來源')
+    if action['kind']=='attack':
+        return simulate_attack(state,action)
     if action['kind']=='hero_power' and number(source,'EXHAUSTED'):
         return Transition(None,'英雄能力已耗用')
     definition=cards.get(source.get('card_id'),{})
@@ -107,6 +109,44 @@ def simulate_card(state,action,cards):
     return Transition(after)
 
 
+def simulate_attack(state,action):
+    own,enemy=sides(state)
+    entities=entity_map(state)
+    source=entities.get(action.get('entity_id'));target=entities.get(action.get('target_id'))
+    if source is None or target is None:return Transition(None,'攻擊來源或目標已不存在')
+    if source not in own['board'] or target not in enemy['board']+enemy['heroes']:
+        return Transition(None,'只模擬我方手下攻擊敵方角色')
+    blocked=('IMMUNE','CANT_BE_DAMAGED','DORMANT','CANT_BE_ATTACKED','STEALTH',
+             'DEATHRATTLE','REBORN','LIFESTEAL','CANT_ATTACK','CANT_ATTACK_HEROES')
+    if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes'] for t in blocked):
+        return Transition(None,'尚未建模的攻擊限制或觸發')
+    if source['tags'].get('EXHAUSTED')!='0' or number(source,'FROZEN') or number(source,'ATK')<=0:
+        return Transition(None,'攻擊者未確認可攻擊')
+    taunts=[e for e in enemy['board'] if number(e,'TAUNT')]
+    if taunts and target not in taunts:return Transition(None,'仍有嘲諷')
+    hero_target=target['tags'].get('CARDTYPE')=='HERO'
+    if hero_target and number(source,'RUSH') and number(source,'NUM_TURNS_IN_PLAY')==0 and not number(source,'CHARGE'):
+        return Transition(None,'新進場衝刺手下不能攻擊英雄')
+    after=copy.deepcopy(state);me,foe=sides(after)
+    src=entity_map(after)[source['id']];dst=entity_map(after)[target['id']]
+    def damage(entity,amount,poison=False):
+        if amount<=0:return
+        if number(entity,'DIVINE_SHIELD'):entity['tags']['DIVINE_SHIELD']='0';return
+        armor=min(amount,number(entity,'ARMOR'))
+        entity['tags']['ARMOR']=str(number(entity,'ARMOR')-armor)
+        entity['tags']['DAMAGE']=str(number(entity,'HEALTH') if poison and amount>armor else number(entity,'DAMAGE')+amount-armor)
+    damage(dst,number(src,'ATK'),bool(number(src,'POISONOUS')) and not hero_target)
+    if not hero_target:damage(src,number(dst,'ATK'),bool(number(dst,'POISONOUS')))
+    attacks=number(src,'NUM_ATTACKS_THIS_TURN')+1
+    src['tags']['NUM_ATTACKS_THIS_TURN']=str(attacks)
+    src['tags']['EXHAUSTED']='1' if attacks>=(2 if number(src,'WINDFURY') else 1) else '0'
+    for player in (me,foe):
+        player['board']=[e for e in player['board'] if hp(e)>0]
+        for index,e in enumerate(player['board'],1):e['tags']['ZONE_POSITION']=str(index)
+    after['options']=[];after['options_fresh']=False
+    return Transition(after)
+
+
 def rollout_actions(state,cards):
     """Internal proposals only; simulate_card validates each supported transition."""
     own,enemy=sides(state)
@@ -120,6 +160,12 @@ def rollout_actions(state,cards):
                             description=name_of(entity,cards),cost=card_cost(entity,cards))
                 if target is not None:action['target_id']=target
                 yield action
+    for source in own['board']:
+        if source['tags'].get('EXHAUSTED')!='0':continue
+        for target in enemy['board']+enemy['heroes']:
+            yield dict(key=f"sim:attack:{source['id']}:{target['id']}",kind='attack',
+                       entity_id=source['id'],target_id=target['id'],cost=0,
+                       description=f"{name_of(source,cards)} → {name_of(target,cards)}")
 
 
 def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
@@ -127,7 +173,7 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
     results=[];frontier=[]
     deadline=time.monotonic()+time_budget
     for action in actions.values():
-        if action['kind'] not in ('play','hero_power'):continue
+        if action['kind'] not in ('play','hero_power','attack'):continue
         transition=simulate_card(state,action,cards)
         if transition.state is None:continue
         frontier.append((transition.state,action,[action['description']]))

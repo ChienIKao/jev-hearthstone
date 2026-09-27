@@ -7,6 +7,8 @@ from strategy import sides, number, hp, vanilla, get_actions, text_of
 # These printed effects resolve when played, not during minion combat.
 # Exact text checks make a card-data update fall back to unknown effects.
 COMBAT_INERT={
+    'CORE_NEW1_023':'飄渺',
+    'END_033':'飄渺若你手中有其他龍類，消耗減少(3)',
     'CATA_556':'戰吼：獲得一個消耗為(3)以下的隨機龍類',
     'CAP_107':'戰吼：獲得一個1/1砲手，它會在回合結束時對一個隨機敵人造成1點傷害',
     'EDR_456':'戰吼：若你手中有龍類，發現一個有黑暗贈禮的龍類',

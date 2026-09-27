@@ -7,6 +7,56 @@ from turn_search import COMBAT_INERT
 
 
 class CardSimulationTests(unittest.TestCase):
+    def test_battlecry_clears_taunt_before_face_attack(self):
+        state,cards,action=self.dragon()
+        attacker=unit(8,'1',6,6,EXHAUSTED=0)
+        taunt=unit(7,'2',1,5,TAUNT=1)
+        state['players'][0]['board']=[attacker]
+        state['players'][1]['board']=[taunt]
+        state['players'][1]['heroes'][0]['tags']['HEALTH']='6'
+        state['options']=[option(0,5,[7,102]),option(1,8,[7])]
+        cards.update({'8':{'text':''},'7':{'text':'嘲諷'}})
+        before=copy.deepcopy(state)
+        plans=card_plans(state,cards,time_budget=1)
+        self.assertTrue(plans[0]['lethal'])
+        self.assertEqual(plans[0]['action']['entity_id'],5)
+        self.assertEqual(plans[0]['action']['target_id'],7)
+        self.assertEqual(len(plans[0]['sequence']),2)
+        self.assertEqual(state,before)
+
+    def test_attack_opens_board_slot_for_card(self):
+        board=[unit(i,'1',1,1,EXHAUSTED=0 if i==1 else 1) for i in range(1,8)]
+        state,cards=fixture(board,[unit(8,'2',1,1)],[option(0,1,[8])])
+        card=unit(9,'1',8,8,COST=2)
+        card['tags']['ZONE']='HAND'
+        state['players'][0]['hand']=[card];cards['9']={'text':''}
+        plans=card_plans(state,cards,time_budget=1,max_depth=2)
+        self.assertEqual(plans[0]['action']['key'],'o0t0')
+        self.assertEqual(len(plans[0]['sequence']),2)
+        self.assertIn('8/8',plans[0]['summary'])
+
+    def test_attack_limits_and_simultaneous_poison_shield_damage(self):
+        state,cards=fixture([unit(1,'1',1,5,EXHAUSTED=0,WINDFURY=1,DIVINE_SHIELD=1)],
+                            [unit(2,'2',1,8,POISONOUS=1)],[])
+        attack=dict(kind='attack',entity_id=1,target_id=2)
+        first=simulate_card(state,attack,cards).state
+        self.assertEqual(first['players'][0]['board'][0]['tags']['EXHAUSTED'],'0')
+        self.assertEqual(first['players'][0]['board'][0]['tags']['DIVINE_SHIELD'],'0')
+        second=simulate_card(first,attack,cards).state
+        self.assertEqual(second['players'][0]['board'],[])
+        self.assertEqual(second['players'][1]['board'][0]['tags']['DAMAGE'],'2')
+        self.assertIsNone(simulate_card(second,attack,cards).state)
+
+    def test_normal_attack_once_and_summoning_exhaustion(self):
+        state,cards=fixture([unit(1,'1',3,3,EXHAUSTED=0)],[],[])
+        attack=dict(kind='attack',entity_id=1,target_id=102)
+        after=simulate_card(state,attack,cards).state
+        self.assertIsNone(simulate_card(after,attack,cards).state)
+        card=unit(9,'1',8,8,COST=2);card['tags']['ZONE']='HAND'
+        state['players'][0]['hand']=[card];cards['9']={'text':''}
+        after=simulate_card(state,dict(kind='play',entity_id=9),cards).state
+        self.assertIsNone(simulate_card(after,dict(kind='attack',entity_id=9,target_id=102),cards).state)
+
     def test_search_chains_cards_without_reusing_them(self):
         state,cards=fixture([],[],[option(0,5,[]),option(1,6,[])])
         for ident in (5,6):
