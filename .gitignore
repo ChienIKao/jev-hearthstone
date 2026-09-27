@@ -8,6 +8,8 @@
 !start.ps1
 !stop.cmd
 !stop.ps1
+!setup.cmd
+!RELEASE_NOTES.md
 !assets/
 !assets/menu-next.png
 !assets/turn-banner.png

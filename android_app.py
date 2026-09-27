@@ -271,6 +271,7 @@ class AndroidPanel:
         if self.busy:
             return
         self.busy = True
+        self.refresh_controls()
         self.stop.clear()
         self.status.set(description)
         serial=self.hands.device.serial if self.hands else self.serial.get()
@@ -402,6 +403,7 @@ class AndroidPanel:
                 self.root.after(100,self.tick)
                 return
             self.busy = False
+            self.refresh_controls()
             if self.closing:
                 self.root.destroy()
                 return

@@ -3,17 +3,17 @@ import tkinter as tk
 from tkinter import ttk
 import webbrowser
 
-BG='#1e1e1e'
-PANEL='#1e1e1e'
-TEXT='#dedede'
-MUTED='#989898'
-GOLD='#c4cbd0'
+BG='#202328'
+PANEL='#292d33'
+TEXT='#eef0f3'
+MUTED='#a3aab5'
+GOLD='#a8c7f3'
 
 
 def build_panel(app):
     root=app.root
-    root.geometry('960x680')
-    root.minsize(900,640)
+    root.geometry('1160x760')
+    root.minsize(1080,720)
     root.configure(bg=BG)
     root.option_add('*TCombobox*Listbox.background',PANEL)
     root.option_add('*TCombobox*Listbox.foreground',TEXT)
@@ -28,8 +28,9 @@ def build_panel(app):
     style.configure('Heading.TLabel',font=('Microsoft JhengHei UI',12,'bold'))
     style.configure('TButton',background='#252525',foreground=TEXT,borderwidth=1,padding=(12,6),bordercolor='#454545',lightcolor='#454545',darkcolor='#454545',relief='flat')
     style.map('TButton',background=[('active','#383838')])
-    style.configure('Accent.TButton',background='#262626',foreground=TEXT,font=('Microsoft JhengHei UI',10))
-    style.map('Accent.TButton',background=[('active','#3b3b3b')])
+    style.configure('Accent.TButton',background='#719fd8',foreground='#101b2a',font=('Microsoft JhengHei UI',11,'bold'))
+    style.map('Accent.TButton',background=[('disabled','#3a4552'),('active','#91b8e8')])
+    style.map('TButton',foreground=[('disabled','#717780')],background=[('disabled','#282b30'),('active','#3a414a')])
     style.configure('Stop.TButton',background='#583437',foreground='#ffdddd')
     style.configure('TEntry',fieldbackground=PANEL,foreground=TEXT,insertcolor=TEXT,padding=7)
     style.configure('TCombobox',fieldbackground=PANEL,background='#252525',foreground=TEXT,padding=6)
@@ -45,10 +46,16 @@ def build_panel(app):
     style.configure('Treeview',bordercolor='#404040',lightcolor=BG,darkcolor=BG,relief='flat')
     style.configure('Treeview.Heading',bordercolor='#404040',lightcolor=BG,darkcolor=BG,relief='flat')
     style.configure('TSeparator',background='#404040')
+    style.configure('Vertical.TScrollbar',background='#46505c',troughcolor='#1b1e22',arrowcolor=MUTED,bordercolor=BG,lightcolor=BG,darkcolor=BG)
     style.map('Treeview',background=[('selected','#4b5967')])
     shell=ttk.Frame(root,padding=0);shell.pack(fill='both',expand=True)
-    nav=tk.Frame(shell,bg=BG)
-    nav.pack(fill='x')
+    nav=tk.Frame(shell,bg='#191c20',width=166)
+    nav.pack(side='left',fill='y')
+    nav.pack_propagate(False)
+    tk.Label(nav,text='LAYA',bg='#191c20',fg=TEXT,font=('Segoe UI',22,'bold')).pack(anchor='w',padx=22,pady=(28,0))
+    tk.Label(nav,text='爐石助手',bg='#191c20',fg=MUTED,font=('Microsoft JhengHei UI',10)).pack(anchor='w',padx=24,pady=(0,32))
+    nav_items=tk.Frame(nav,bg='#191c20');nav_items.pack(fill='x')
+    tk.Label(nav,text='v0.1.0  ·  MuMu',bg='#191c20',fg=MUTED,font=('Segoe UI',9)).pack(side='bottom',anchor='w',padx=22,pady=22)
     style.layout('Pages.TNotebook.Tab',[])
     book=ttk.Notebook(shell,style='Pages.TNotebook');book.pack(fill='both',expand=True)
     ranked=ttk.Frame(book,padding=(28,28));library=ttk.Frame(book,padding=24);advanced=ttk.Frame(book,padding=24)
@@ -59,52 +66,70 @@ def build_panel(app):
     def select_page(page):
         book.select(page)
         for target,button,line in navigation:
-            button.configure(fg=TEXT if target is page else MUTED)
-            line.configure(bg='#687781' if target is page else '#383838')
+            button.configure(fg=TEXT if target is page else MUTED,bg='#303944' if target is page else '#191c20')
+            line.configure(bg='#89b4eb' if target is page else '#191c20')
     for column,(page,title) in enumerate([(ranked,'排位作業'),(library,'牌組與環境'),(preview,'遊戲畫面'),(advanced,'進階設定')]):
-        nav.columnconfigure(column,weight=1,uniform='tabs')
-        cell=tk.Frame(nav,bg=BG)
-        cell.grid(row=0,column=column,sticky='ew')
+        cell=tk.Frame(nav_items,bg='#191c20')
+        cell.pack(fill='x',pady=3)
         button=tk.Button(cell,text=title,command=lambda page=page:select_page(page),
-                         bg=BG,fg=MUTED,activebackground='#282828',activeforeground=TEXT,
+                         bg='#191c20',fg=MUTED,activebackground='#303944',activeforeground=TEXT,
                          relief='flat',borderwidth=0,highlightthickness=0,pady=11,
                          font=('Microsoft JhengHei UI',10))
-        button.pack(fill='x')
-        line=tk.Frame(cell,height=2,bg='#383838');line.pack(fill='x')
+        line=tk.Frame(cell,width=3,bg='#191c20');line.pack(side='left',fill='y')
+        button.pack(side='left',fill='x',expand=True)
         navigation.append((page,button,line))
     select_page(ranked)
-    sidebar=ttk.Frame(ranked,width=210)
-    sidebar.pack(side='left',fill='y',padx=(0,48))
-    sidebar.pack_propagate(False)
-    tasks=tk.Frame(sidebar,bg=BG,highlightbackground='#404040',highlightthickness=1)
-    tasks.pack(fill='both',expand=True,pady=(0,16))
-    ttk.Label(tasks,text='☑   連續爬排位',foreground=TEXT).pack(anchor='w',padx=18,pady=(18,12))
-    for name in ('每日任務','每週任務','活動任務'):
-        ttk.Label(tasks,text='□   '+name+' · 待開放',foreground=MUTED).pack(anchor='w',padx=18,pady=8)
-    ttk.Label(sidebar,text='任務完成後',anchor='center').pack(fill='x',pady=(0,5))
-    ttk.Label(sidebar,text='停止操作',anchor='center',style='Muted.TLabel').pack(fill='x',pady=(0,16))
-    ttk.Button(sidebar,text='開始',command=app.ranked).pack(fill='x',padx=35,ipady=7)
-    ttk.Button(sidebar,text='停止 · F8',command=app.cancel).pack(fill='x',padx=35,pady=(8,0))
-    settings=ttk.Frame(ranked)
-    settings.pack(side='left',fill='both',expand=True)
-    ttk.Label(settings,text='連續爬排位').pack(anchor='w',pady=(0,22))
-    controls=ttk.Frame(settings);controls.pack(fill='x',pady=(0,16))
-    ttk.Label(controls,text='使用牌組').grid(row=0,column=0,sticky='w',pady=(0,8))
-    app.deck_picker=ttk.Combobox(controls,state='readonly',width=22)
-    app.deck_picker.grid(row=1,column=0,sticky='ew',padx=(0,12))
+    heading=ttk.Frame(ranked);heading.pack(fill='x',pady=(0,24))
+    ttk.Label(heading,text='排位作業',style='Title.TLabel').pack(anchor='w')
+    ttk.Label(heading,text='選好牌組，交給 Laya。',style='Muted.TLabel').pack(anchor='w',pady=(6,0))
+    body=ttk.Frame(ranked);body.pack(fill='both',expand=True)
+    sidebar=ttk.Frame(body,width=302,padding=20,style='Card.TFrame')
+    sidebar.pack(side='left',fill='y',padx=(0,22));sidebar.pack_propagate(False)
+    def card_label(text,**kwargs):
+        label=ttk.Label(sidebar,text=text,background=PANEL,**kwargs);label.pack(anchor='w');return label
+    card_label('作業設定',font=('Microsoft JhengHei UI',13,'bold'))
+    card_label('連續爬排位',foreground=GOLD).pack_configure(pady=(22,6))
+    card_label('使用牌組',foreground=MUTED).pack_configure(pady=(14,8))
+    app.deck_picker=ttk.Combobox(sidebar,state='readonly',width=22)
+    app.deck_picker.pack(fill='x')
     app.deck_picker.bind('<<ComboboxSelected>>',app.select_deck)
-    ttk.Button(controls,text='編輯打法',command=app.edit_deck).grid(row=1,column=1,padx=(0,22))
-    ttk.Label(controls,text='執行局數 · 0 為持續',style='Muted.TLabel').grid(row=2,column=0,sticky='w',pady=(18,8))
+    ttk.Button(sidebar,text='編輯牌組與打法',command=app.edit_deck).pack(fill='x',pady=(10,24))
+    card_label('執行局數',foreground=MUTED)
     app.game_limit=tk.StringVar(value='0')
-    ttk.Spinbox(controls,from_=0,to=999,textvariable=app.game_limit,width=9).grid(row=3,column=0,sticky='w',padx=(0,18))
-    ttk.Button(controls,text='連線',command=app.connect).grid(row=3,column=1,padx=(0,8),sticky='w')
-    ttk.Label(settings,textvariable=app.status,wraplength=560,foreground=GOLD).pack(anchor='w',pady=(0,6))
-    ttk.Label(settings,textvariable=app.summary,style='Muted.TLabel').pack(anchor='w',pady=(0,10))
-    ttk.Separator(settings).pack(fill='x',pady=16)
-    ttk.Label(settings,text='執行紀錄').pack(anchor='w',pady=(0,10))
-    app.run_log=tk.Text(settings,height=10,wrap='word',state='disabled',bg=PANEL,fg=MUTED,
-                        relief='flat',padx=0,pady=4,font=('Microsoft JhengHei UI',10))
-    app.run_log.pack(fill='both',expand=True)
+    ttk.Spinbox(sidebar,from_=0,to=999,textvariable=app.game_limit,width=9).pack(fill='x',pady=(8,6))
+    card_label('指定局數後停止；0 表示持續執行。',foreground=MUTED,font=('Microsoft JhengHei UI',9))
+    ttk.Separator(sidebar).pack(fill='x',pady=22)
+    card_label('裝置連線',foreground=MUTED)
+    app.connect_button=ttk.Button(sidebar,text='連線 MuMu',command=app.connect)
+    app.connect_button.pack(fill='x',pady=(10,0))
+    app.stop_button=ttk.Button(sidebar,text='停止作業 · F8',command=app.cancel,style='Stop.TButton')
+    app.stop_button.pack(side='bottom',fill='x',pady=(10,0))
+    app.start_button=ttk.Button(sidebar,text='開始作業',command=app.ranked,style='Accent.TButton')
+    app.start_button.pack(side='bottom',fill='x',ipady=6)
+    settings=ttk.Frame(body);settings.pack(side='left',fill='both',expand=True)
+    status_box=ttk.Frame(settings,padding=18,style='Card.TFrame');status_box.pack(fill='x')
+    app.activity_label=ttk.Label(status_box,text='●  待命',foreground=GOLD,background=PANEL,font=('Microsoft JhengHei UI',12,'bold'))
+    app.activity_label.pack(anchor='w',pady=(0,10))
+    status_label=ttk.Label(status_box,textvariable=app.status,wraplength=460,background=PANEL)
+    status_label.pack(fill='x')
+    status_box.bind('<Configure>',lambda e:status_label.configure(wraplength=max(120,e.width-40)))
+    summary_label=ttk.Label(settings,textvariable=app.summary,style='Muted.TLabel',wraplength=460)
+    summary_label.pack(fill='x',pady=(12,22))
+    ttk.Label(settings,text='執行紀錄',style='Heading.TLabel').pack(anchor='w',pady=(0,10))
+    log_box=ttk.Frame(settings);log_box.pack(fill='both',expand=True)
+    app.run_log=tk.Text(log_box,height=10,wrap='word',state='disabled',bg='#1b1e22',fg=MUTED,
+                        relief='flat',padx=14,pady=12,font=('Microsoft JhengHei UI',10),spacing3=6)
+    log_scroll=ttk.Scrollbar(log_box,command=app.run_log.yview);log_scroll.pack(side='right',fill='y')
+    app.run_log.configure(yscrollcommand=log_scroll.set);app.run_log.pack(fill='both',expand=True)
+    ttk.Label(settings,text='每日、每週與活動任務將於後續版本加入。',style='Muted.TLabel',font=('Microsoft JhengHei UI',9)).pack(anchor='w',pady=(14,0))
+    def refresh_controls():
+        app.start_button.configure(state='disabled' if app.busy else 'normal')
+        app.connect_button.configure(state='disabled' if app.busy else 'normal')
+        app.stop_button.configure(state='normal' if app.busy else 'disabled')
+        app.deck_picker.configure(state='disabled' if app.busy else 'readonly')
+        app.activity_label.configure(text='●  執行中' if app.busy else ('●  已連線' if app.hands else '●  待命'))
+    app.refresh_controls=refresh_controls
+    refresh_controls()
     ttk.Button(preview,text='更新預覽',command=app.refresh).pack(side='bottom',anchor='e',pady=(10,0))
     observed=ttk.Frame(preview,width=310)
     observed.pack(side='right',fill='y',padx=(16,0))
@@ -118,8 +143,12 @@ def build_panel(app):
     app.canvas=tk.Canvas(preview,width=560,height=420,bg=BG,highlightthickness=1,highlightbackground='#404040')
     app.canvas.pack(fill='both',expand=True)
     app.canvas.bind('<Configure>',app.render_preview)
-    app.canvas.create_text(480,245,text='準備好你的下一場對局',fill=TEXT,font=('Microsoft JhengHei UI',21,'bold'))
-    app.canvas.create_text(480,292,text='開啟 MuMu 與爐石，連線後即可預覽遊戲畫面。',fill=MUTED,font=('Microsoft JhengHei UI',11))
+    def empty_preview(event):
+        if not hasattr(app,'preview_image'):
+            app.canvas.delete('all')
+            app.canvas.create_text(event.width/2,event.height/2-16,text='尚未取得遊戲畫面',fill=TEXT,font=('Microsoft JhengHei UI',16,'bold'))
+            app.canvas.create_text(event.width/2,event.height/2+22,text='連線 MuMu 後，按「更新預覽」。',fill=MUTED,font=('Microsoft JhengHei UI',10))
+    app.canvas.bind('<Configure>',empty_preview,add='+')
     ttk.Label(library,text='牌組與打法',style='Heading.TLabel').pack(anchor='w')
     ttk.Label(library,text='每副牌組保存自己的模式、起手換牌、資源安排與 combo。',style='Muted.TLabel').pack(anchor='w',pady=(8,20))
     row=ttk.Frame(library);row.pack(anchor='w')

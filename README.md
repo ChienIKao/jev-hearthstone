@@ -12,6 +12,16 @@ HSReplay 提供公開頁面文字匯入：保存環境牌組與留牌統計快�
 
 ## 開始使用
 
+### Windows release 安裝
+
+下載 release 的 `Laya-Hearthstone-v0.1.0-windows-source.zip`，解壓到可寫入的資料夾。本版是附安裝腳本的原始碼套件，需要 Windows、Python 3.12（含 Python Launcher）與 MuMu；不是免安裝執行檔。
+
+1. 雙擊 `setup.cmd`：建立虛擬環境、安裝相依套件，並下載繁體卡牌資料與 Laya 多語模型。首次需要網路及模型下載空間。
+2. 雙擊 `start.cmd` 開啟助手。在「進階設定」填入自己的 MuMu ADB 路徑與裝置位址，再按「連線 MuMu」。
+3. 依下方說明啟用 Android 爐石日誌並重啟遊戲。在「牌組與環境」新增與遊戲內同名的牌組、填寫打法，再回排位頁設定局數及開始作業。
+
+執行中可按「停止作業」或 F8；關閉視窗也會要求停止。日誌、個人牌組、BattleTag、模型快取及校準資料不隨 release 發布。CPU 可執行；如需 GPU 加速，另依 GPU 安裝相容的 PyTorch。模型及卡牌準備後，可用 `.venv\Scripts\python.exe bootstrap.py --offline` 驗證本機資料。
+
 ### MuMu Android 操作
 
 雙擊 `start.cmd` 開啟 MuMu 面板，按「連線」讀取局面。面板提供合法動作單步、Laya 單步、連續接手本局與停止。連續接手會等待對手回合，遇到未確認操作即停止；新對局需重新啟動接手。每次開啟都處於觀察模式。首次 Laya 載入可能較久，停止後會在模型返回時取消輸入。
