@@ -3,6 +3,7 @@ import copy
 from dataclasses import dataclass
 from strategy import sides,number,hp
 from turn_search import combat_inert,passive_weapons_known
+from enchantments import enchantment_boundary
 
 
 @dataclass
@@ -13,7 +14,7 @@ class TurnEnd:
 
 def finish_turn(state,cards,max_outcomes=128):
     own,enemy=sides(state)
-    if state.get('enchantments') or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
+    if enchantment_boundary(state,cards) or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
         return TurnEnd([],'未建模的秘密、武器或附魔結算')
     if any(not combat_inert(e,cards) for p in (own,enemy) for e in p['board']):
         return TurnEnd([],'未建模的回合結束效果')

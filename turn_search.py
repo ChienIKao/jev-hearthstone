@@ -2,6 +2,7 @@
 import copy
 import time
 from strategy import sides, number, hp, vanilla, get_actions, text_of
+from enchantments import enchantment_boundary
 
 
 # These effects do not trigger during the supported action prefixes. End-turn
@@ -21,10 +22,15 @@ COMBAT_INERT={
     'TIME_063':'休眠5回合衝刺。在你打出最新資料片的牌後，提早1回合甦醒',
     'CATA_584':'造成3點傷害，隨機分給敵人。若你本回合打過火焰法術，額外造成3點',
     'CORE_REV_990':'對一個手下造成1點傷害並賦予它+2攻擊力',
+    'EDR_457':'戰吼：若你手中有龍類，裝備一把2/2的劍',
+    'EDR_492':'戰吼：召喚三個有衝刺的1/1小鴨子',
+    'JAIL_432':'戰吼：若你於此牌在手中時打出對手卡牌的複製品，對全部敵方手下造成2點傷害',
+    'TLC_624':'戰吼：為你受傷的手下召喚分身，並賦予它們衝刺',
 }
 
 # These weapons have no effect during a minion attack or the supported card plays.
 PREFIX_WEAPONS={
+    'EDR_457t':'',
     'TLC_833':'在你的英雄攻擊後，召喚一個有衝刺的2/1蛆蟲',
     'CORE_GVG_059':'戰吼：賦予一個隨機的友方手下聖盾術和嘲諷',
 }
@@ -32,7 +38,7 @@ PREFIX_WEAPONS={
 
 def passive_weapons_known(state,cards):
     own,enemy=sides(state)
-    return all(PREFIX_WEAPONS.get(e.get('card_id'))==''.join(text_of(e,cards).split())
+    return all(bool(cards.get(e.get('card_id'))) and PREFIX_WEAPONS.get(e.get('card_id'))==''.join(text_of(e,cards).split())
                for p in (own,enemy) for e in p.get('weapons',[]))
 
 
@@ -45,7 +51,7 @@ def combat_inert(entity,cards):
 def combat_plans(state,cards,limit=5,beam_width=32,time_budget=.04):
     own,enemy=sides(state)
     actions,unsupported=get_actions(state,cards)
-    if unsupported or state.get('enchantments'):
+    if unsupported or enchantment_boundary(state,cards):
         return []
     if any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
         return []

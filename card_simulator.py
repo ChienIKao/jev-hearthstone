@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from strategy import sides, entity_map, card_cost, number, hp, text_of, vanilla, get_actions, name_of
 from turn_search import combat_inert, COMBAT_INERT, passive_weapons_known
+from enchantments import enchantment_boundary
 
 PLAIN_BODIES={'CORE_NEW1_023':'飄渺',
               'END_033':'飄渺若你手中有其他龍類，消耗減少(3)'}
@@ -18,7 +19,7 @@ class Transition:
 def simulate_card(state,action,cards):
     """Consume an already legal action; never infer random cards or deck order."""
     own,enemy=sides(state)
-    if state.get('enchantments') or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
+    if enchantment_boundary(state,cards) or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
         return Transition(None,'秘密、武器或附魔效果尚未模擬')
     if any(not combat_inert(e,cards) for p in (own,enemy) for e in p['board']):
         return Transition(None,'場上有尚未建模的觸發效果')

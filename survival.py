@@ -3,6 +3,7 @@ import copy
 import time
 from strategy import sides,number,hp
 from turn_search import combat_inert,passive_weapons_known
+from enchantments import enchantment_boundary
 
 
 def visible_attack_threat(state,cards,time_budget=.008):
@@ -12,7 +13,7 @@ def visible_attack_threat(state,cards,time_budget=.008):
     def result(value,reason=None):return dict(lethal=value,scope=scope,reason=reason)
     if hp(own['heroes'][0])<=0:return result(True)
     if hp(enemy['heroes'][0])<=0:return result(False)
-    if state.get('enchantments') or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
+    if enchantment_boundary(state,cards) or any(p.get('secret_count',0) for p in (own,enemy)) or not passive_weapons_known(state,cards):
         return result(None,'未建模的秘密、武器或附魔')
     if any(not combat_inert(e,cards) for p in (own,enemy) for e in p['board']):
         return result(None,'未建模的場上觸發')

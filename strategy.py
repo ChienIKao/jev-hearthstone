@@ -185,7 +185,8 @@ def vanilla(e, cards):
 def attack_lethal(state, actions, cards, time_budget=0.025):
     """Certificate only for attack-only, trigger-free boards; returns first action."""
     own, enemy = sides(state)
-    if state.get('enchantments') or any(p.get('weapons') or p.get('secret_count',0) for p in (own,enemy)):
+    from enchantments import enchantment_boundary
+    if enchantment_boundary(state,cards) or any(p.get('weapons') or p.get('secret_count',0) for p in (own,enemy)):
         return None
     if any(number(e,t) for p in (own,enemy) for e in p['board']+p['heroes']
            for t in ('CANT_ATTACK','CANT_ATTACK_HEROES','CANT_BE_ATTACKED','STEALTH')):
