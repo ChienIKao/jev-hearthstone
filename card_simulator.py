@@ -173,6 +173,7 @@ def rollout_actions(state,cards):
 
 def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
     from turn_end import finish_turn
+    from survival import end_turn_threat
     actions,_=get_actions(state,cards)
     results=[];frontier=[]
     deadline=time.monotonic()+time_budget
@@ -219,6 +220,12 @@ def card_plans(state,cards,limit=2,max_depth=3,beam_width=16,time_budget=.04):
             result['summary']=(f"回合結束（隨機結算）：敵英雄 {min(health)}–{max(health)}；"
                 f"敵手下 {min(counts)}–{max(counts)}；敵場攻擊 {min(pressure)}–{max(pressure)}；"
                 f"斬殺率 {result['lethal_probability']:.0%}")
+        threat=end_turn_threat(ending,cards,min(.004,max(0,deadline-time.monotonic())))
+        result['counterattack']=threat
+        probability=threat['lethal_probability']
+        if probability is not None:
+            result['score']-=100*probability
+            result['summary']+=f'；可見手下反擊致命率 {probability:.0%}'
         return result
     for depth in range(max_depth):
         frontier=sorted(frontier,key=lambda n:evaluate(*n)['score'],reverse=True)[:beam_width]

@@ -124,8 +124,16 @@ class Decider:
         result={'evaluation':evaluation,'model_answer':None,'device':self.device}
         from turn_search import combat_plans
         from card_simulator import card_plans
+        from turn_end import finish_turn
+        from survival import end_turn_threat
         plans=combat_plans(state,self.cards,limit=3)+card_plans(state,self.cards,max_depth=16,beam_width=32,time_budget=.06)
         result['search_plans']=plans
+        threat=end_turn_threat(finish_turn(state,self.cards),self.cards,time_budget=.012)
+        result['counterattack_if_pass']=threat
+        survival_required=threat['lethal_probability'] is not None and threat['lethal_probability']>=1-1e-9
+        result['survival_required']=survival_required
+        survival=[p for p in plans if p.get('complete_turn') and p.get('counterattack',{}).get('lethal_probability')==0
+                  and p['score']>-100000]
         certified=next((p for p in plans if p['lethal']),None)
         if evaluation['lethal']:
             chosen=evaluation['lethal']['action']
@@ -134,6 +142,10 @@ class Decider:
             chosen=certified['action']
             result['lethal_certificate']=certified
             method='rules_search_lethal'
+        elif survival_required and survival:
+            chosen=max(survival,key=lambda p:p['score'])['action']
+            result['survival_plan']=max(survival,key=lambda p:p['score'])
+            method='rules_survival'
         elif len(get_actions(state,self.cards)[0])==1:
             chosen=next(iter(get_actions(state,self.cards)[0].values()))
             method='rules_single'
@@ -145,6 +157,7 @@ class Decider:
                 plan_options['other']='改選出牌、技能或其他合法動作'
                 context=compact_state(state,self.cards)
                 context['deck_strategy']=strategy_context(self.profile)
+                if survival_required:context['priority']='保命：若現在結束回合，對手可用可見手下攻擊致命。'
                 try:
                     answer,budget=predict_choice(self.router,context,{'move':dict(type='choice',
                         instructions='比較方案結果；標示回合結束者已結算，其餘只是局部推演。隨機結果不代表必然斬殺。也可選其他動作。',criteria=plan_options)})
@@ -157,7 +170,7 @@ class Decider:
             else:
                 chosen,trace=staged_action(state,self.cards,self.profile,
                                           lambda context,question:predict_choice(self.router,context,question),
-                                          action_scores={a['key']:a['rule_score'] for a in ranked})
+                                          action_scores={a['key']:a['rule_score'] for a in ranked},survival_required=survival_required)
             result['stages']=trace
             result['device']=self.device
             method='laya_search' if selected_plan else ('hybrid_staged' if any(t['heuristic_adjusted'] for t in trace) else 'laya_staged')

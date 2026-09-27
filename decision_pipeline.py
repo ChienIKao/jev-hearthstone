@@ -124,11 +124,12 @@ def _predict_batch(router,agent,context,question,maximum,head):
                        head_max_len=head,omitted=reductions)
 
 
-def staged_action(state,cards,profile,choose,action_scores=None):
+def staged_action(state,cards,profile,choose,action_scores=None,survival_required=False):
     actions,_=get_actions(state,cards)
     remaining=list(actions.values())
     context=compact_state(state,cards)
     context['deck_strategy']=strategy_context(profile)
+    if survival_required:context['priority']='保命：若現在結束回合，對手可用可見手下攻擊致命。'
     trace=[]
     entities=entity_map(state)
     kind_names={'play':'出牌','attack':'攻擊','hero_power':'英雄能力','end_turn':'結束回合'}
