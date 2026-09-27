@@ -1,7 +1,8 @@
 """Bounded model requests and hierarchical selection of complete legal actions."""
 import copy
 import json
-from strategy import compact_state, get_actions, entity_map, name_of
+import math
+from strategy import compact_state, get_actions, entity_map, name_of, number, hp
 from deck_profiles import strategy_context
 
 
@@ -120,7 +121,7 @@ def _predict_batch(router,agent,context,question,maximum,head):
                        head_max_len=head,omitted=reductions)
 
 
-def staged_action(state,cards,profile,choose):
+def staged_action(state,cards,profile,choose,action_scores=None):
     actions,_=get_actions(state,cards)
     remaining=list(actions.values())
     context=compact_state(state,cards)
@@ -128,30 +129,47 @@ def staged_action(state,cards,profile,choose):
     trace=[]
     entities=entity_map(state)
     kind_names={'play':'出牌','attack':'攻擊','hero_power':'英雄能力','end_turn':'結束回合'}
-    for stage,field in [('動作種類','kind'),('使用卡牌','entity_id'),('指定目標','target_id')]:
+    for stage,field in [('動作與卡牌','source'),('指定目標','target_id')]:
         groups={}
-        for action in remaining:groups.setdefault(action.get(field),[]).append(action)
+        for action in remaining:
+            value=(action['kind'],action.get('entity_id')) if field=='source' else action.get(field)
+            groups.setdefault(value,[]).append(action)
         if len(groups)==1:continue
         mapping={f'a{i}':group for i,group in enumerate(groups.values())}
         def describe(group):
             first=group[0]
-            if field=='kind':
-                return kind_names.get(first['kind'],first['kind'])+f'（{len(group)} 個合法動作）'
-            if field=='entity_id':
+            if field=='source':
+                if first['kind']=='end_turn':return f"結束回合；剩餘法力 {context['mana']}"
                 source=entities.get(first.get('entity_id'))
                 name=name_of(source,cards) if source else first['description']
                 targets=[str(a['target_id']) for a in group if a.get('target_id') is not None]
-                return name+f"；費用 {first.get('cost',0)}"+('；可選目標 '+','.join(targets) if targets else '')
+                stats=f"；{number(source,'ATK')}/{hp(source)}" if source and source['tags'].get('CARDTYPE') in ('MINION','HERO') else ''
+                return kind_names.get(first['kind'],first['kind'])+'：'+name+f"；費用 {first.get('cost',0)}"+stats+('；可選目標 '+','.join(targets) if targets else '')
             return first['description']
         criteria={key:describe(group) for key,group in mapping.items()}
-        question={'move':dict(type='choice',instructions=f'選擇{stage}。考慮存活、斬殺、順序與資源。',criteria=criteria)}
+        instructions=('選下一步動作或卡牌。根據卡牌效果、牌組計畫、場面與法力決定；之後再選目標。'
+                      if field=='source' else '選擇指定目標。考慮存活、斬殺、順序與資源。')
+        question={'move':dict(type='choice',instructions=instructions,criteria=criteria)}
         answer,budget=choose(context,question)
         if answer['choice'] not in mapping:raise ValueError('模型輸出不在本階段候選中')
-        remaining=mapping[answer['choice']]
+        selected=answer['choice']
+        prior={}
+        probabilities=answer.get('probabilities',{})
+        if action_scores and all(key in probabilities for key in mapping):
+            prior={key:max(action_scores.get(a['key'],0) for a in group) for key,group in mapping.items()}
+            lo,hi=min(prior.values()),max(prior.values())
+            if hi>lo:
+                # A bounded soft preference, never a legality filter: a strong
+                # model preference can outweigh the entire heuristic range.
+                combined={key:math.log(max(float(probabilities[key]),1e-9))+(score-lo)/(hi-lo)
+                          for key,score in prior.items()}
+                selected=max(combined,key=combined.get)
+        remaining=mapping[selected]
         context['selected_action']=remaining[0]['kind']
         sources={a.get('entity_id') for a in remaining}
         if len(sources)==1:context['selected_entity']=next(iter(sources))
-        trace.append(dict(stage=stage,answer=answer,budget=budget))
+        trace.append(dict(stage=stage,answer=answer,budget=budget,selected_choice=selected,
+                          heuristic_scores=prior,heuristic_adjusted=selected!=answer['choice']))
     if len(remaining)!=1:
         raise ValueError('動作仍有未解析的替代操作')
     return remaining[0],trace

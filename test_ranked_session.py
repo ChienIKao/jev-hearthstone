@@ -2,6 +2,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+import json
 from unittest.mock import Mock,patch
 
 from ranked_session import RankedSession,deadline_action
@@ -14,6 +15,27 @@ def state(game,status):
 
 
 class RankedSessionTests(unittest.TestCase):
+    def test_action_log_preserves_search_and_model_trace(self):
+        from test_strategy import fixture
+        current,_=fixture([],[],[])
+        current.update(game_serial='one',revision=12)
+        decision=dict(action=dict(key='o99'),method='laya_search',seconds=.2,
+                      search_plans=[dict(complete_turn=True,summary='test outcome')],
+                      plan_selection=dict(answer={'choice':'p0'},budget={'context_tokens':100}))
+        with tempfile.TemporaryDirectory() as folder:
+            hands=Mock(evidence=Path(folder)/'evidence')
+            hands.cards={}
+            hands.observe.side_effect=[state('old','COMPLETE'),current,state('one','COMPLETE')]
+            hands.run.return_value=dict(confirmed=True,timings={'total':3})
+            decider=Mock();decider.decide.return_value=decision
+            with patch('ranked_session.RankedNavigator') as factory:
+                factory.return_value.enter_game.return_value=current
+                RankedSession(hands,decider,dict(name='龍戰',mode='standard'),threading.Event(),Mock(),1).run()
+            record=json.loads((Path(folder)/'ranked-decisions.jsonl').read_text(encoding='utf-8'))
+            self.assertEqual(record['revision'],12)
+            self.assertEqual(record['decision'],decision)
+            self.assertTrue(record['confirmed'])
+
     def test_mode_selection_touches_emblem_above_caption(self):
         labels=[dict(text='標準',point=[.497,.537]),
                 dict(text='開放',point=[.324,.603]),

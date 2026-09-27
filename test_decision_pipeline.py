@@ -19,6 +19,20 @@ def fake_agent():
 
 
 class StagedDecisionTests(unittest.TestCase):
+    def test_soft_prior_breaks_uncertain_pass_but_allows_confident_pass(self):
+        state,cards=fixture([unit(1,'1')],[],[option(0,1,[102])])
+        def chooser(probability):
+            def choose(context,question):
+                return dict(choice='a1',probabilities={'a0':1-probability,'a1':probability}),{}
+            return choose
+        scores={'o0t0':3,'o99':-3}
+        action,trace=staged_action(state,cards,None,chooser(.53),scores)
+        self.assertEqual(action['kind'],'attack')
+        self.assertTrue(trace[0]['heuristic_adjusted'])
+        action,trace=staged_action(state,cards,None,chooser(.95),scores)
+        self.assertEqual(action['kind'],'end_turn')
+        self.assertFalse(trace[0]['heuristic_adjusted'])
+
     def test_context_heavy_options_are_compared_in_pairs(self):
         from unittest.mock import patch
         from decision_pipeline import ContextBudgetError
@@ -43,13 +57,14 @@ class StagedDecisionTests(unittest.TestCase):
             calls.append(question)
             if len(calls)==1:
                 self.assertNotIn('→',str(question))
-            elif len(calls)==2:
                 self.assertNotIn('selected_entity',context)
-                self.assertTrue(all('2,102' in value for value in question['move']['criteria'].values()))
+                values=list(question['move']['criteria'].values())
+                self.assertEqual(sum('2,102' in value for value in values),2)
+                self.assertTrue(any('結束回合' in value for value in values))
             else:self.assertEqual(context['selected_entity'],1)
             return {'choice':next(iter(question['move']['criteria']))},{}
         staged_action(state,cards,None,choose)
-        self.assertEqual(len(calls),3)
+        self.assertEqual(len(calls),2)
 
     def test_many_choices_are_compared_in_bounded_batches(self):
         router=Mock();router.load.return_value=fake_agent()

@@ -100,9 +100,11 @@ class RankedSession:
                     continue
                 with (self.hands.evidence.parent/'ranked-decisions.jsonl').open('a',encoding='utf-8') as output:
                     output.write(json.dumps(dict(game_serial=game,action=action['key'],
+                                                 turn=state.get('turn'),revision=state.get('revision'),
                                                  description=action['description'],confirmed=result['confirmed'],
                                                  decision_seconds=decision.get('seconds'),
-                                                 method=decision.get('method'),execution=result['timings']),ensure_ascii=False)+'\n')
+                                                 method=decision.get('method'),decision=decision,
+                                                 execution=result['timings']),ensure_ascii=False)+'\n')
                 if not result['confirmed']:
                     raise ValueError('操作未確認，停止爬牌：'+action['description'])
                 self.progress('已確認：'+action['description']+

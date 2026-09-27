@@ -156,10 +156,11 @@ class Decider:
                 chosen,trace=selected_plan['action'],[]
             else:
                 chosen,trace=staged_action(state,self.cards,self.profile,
-                                          lambda context,question:predict_choice(self.router,context,question))
+                                          lambda context,question:predict_choice(self.router,context,question),
+                                          action_scores={a['key']:a['rule_score'] for a in ranked})
             result['stages']=trace
             result['device']=self.device
-            method='laya_search' if selected_plan else 'laya_staged'
+            method='laya_search' if selected_plan else ('hybrid_staged' if any(t['heuristic_adjusted'] for t in trace) else 'laya_staged')
         if chosen['kind']=='end_turn' and evaluation['unsupported_options']:
             raise ValueError('還有未支援的合法操作，請手動處理後再結束回合')
         result.update(action=chosen,method=method,seconds=round(time.monotonic()-start,3))
